@@ -141,12 +141,18 @@ function migrate(db: Database.Database): void {
   try { db.exec(`ALTER TABLE sessions ADD COLUMN result_decisions TEXT`); } catch { /* already exists */ }
   try { db.exec(`ALTER TABLE sessions ADD COLUMN result_blockers TEXT`); } catch { /* already exists */ }
   try { db.exec(`ALTER TABLE sessions ADD COLUMN result_next_steps TEXT`); } catch { /* already exists */ }
+  try { db.exec(`ALTER TABLE sessions ADD COLUMN result_commits TEXT`); } catch { /* already exists */ }
 
   // Stage 3: add worktree columns to tasks
   try { db.exec(`ALTER TABLE tasks ADD COLUMN worktree_path TEXT`); } catch { /* already exists */ }
   try { db.exec(`ALTER TABLE tasks ADD COLUMN worktree_branch TEXT`); } catch { /* already exists */ }
   try { db.exec(`ALTER TABLE tasks ADD COLUMN worktree_status TEXT NOT NULL DEFAULT 'none'`); } catch { /* already exists */ }
   try { db.exec(`ALTER TABLE tasks ADD COLUMN worktree_base_branch TEXT`); } catch { /* already exists */ }
+
+  // Stage 5C: add git and GitHub tracking columns to tasks
+  try { db.exec(`ALTER TABLE tasks ADD COLUMN latest_commit TEXT`); } catch { /* already exists */ }
+  try { db.exec(`ALTER TABLE tasks ADD COLUMN pr_number INTEGER`); } catch { /* already exists */ }
+  try { db.exec(`ALTER TABLE tasks ADD COLUMN pr_url TEXT`); } catch { /* already exists */ }
 
   // Stage 3: unique index — no two tasks can share a worktree branch
   try { db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_worktree_branch ON tasks(worktree_branch) WHERE worktree_branch IS NOT NULL`); } catch { /* already exists */ }
@@ -187,6 +193,8 @@ function migrate(db: Database.Database): void {
       blockers TEXT NOT NULL DEFAULT '[]',
       next_steps TEXT NOT NULL DEFAULT '[]',
       status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'accepted', 'completed', 'cancelled')),
+      commit_sha TEXT,
+      branch TEXT,
       created_at INTEGER NOT NULL,
       consumed_at INTEGER
     );
@@ -197,6 +205,10 @@ function migrate(db: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_handoffs_target_task ON handoffs(target_task_id);
     CREATE INDEX IF NOT EXISTS idx_handoffs_project_status ON handoffs(project_id, status);
   `);
+
+  // Stage 5C: add commit_sha and branch to handoffs for existing DBs
+  try { db.exec(`ALTER TABLE handoffs ADD COLUMN commit_sha TEXT`); } catch { /* already exists */ }
+  try { db.exec(`ALTER TABLE handoffs ADD COLUMN branch TEXT`); } catch { /* already exists */ }
 }
 
 export type Project = {
@@ -222,6 +234,9 @@ export type Task = {
   worktree_branch: string | null;
   worktree_status: string;
   worktree_base_branch: string | null;
+  latest_commit: string | null;
+  pr_number: number | null;
+  pr_url: string | null;
   created_at: number;
   updated_at: number;
 };
@@ -249,6 +264,7 @@ export type Session = {
   result_decisions: string | null;
   result_blockers: string | null;
   result_next_steps: string | null;
+  result_commits: string | null;
 };
 
 export type Decision = {
@@ -445,6 +461,9 @@ export function updateTask(
     worktree_branch: string | null;
     worktree_status: string;
     worktree_base_branch: string | null;
+    latest_commit: string | null;
+    pr_number: number | null;
+    pr_url: string | null;
   }>
 ): Task | null {
   const existing = getTask(projectId, id);
@@ -455,6 +474,7 @@ export function updateTask(
       `UPDATE tasks SET title = ?, description = ?, status = ?, priority = ?,
         assigned_agent = ?, session_id = ?, issue_number = ?, branch = ?,
         worktree_path = ?, worktree_branch = ?, worktree_status = ?, worktree_base_branch = ?,
+        latest_commit = ?, pr_number = ?, pr_url = ?,
         updated_at = ?
        WHERE id = ? AND project_id = ?`
     )
@@ -471,6 +491,9 @@ export function updateTask(
       merged.worktree_branch,
       merged.worktree_status,
       merged.worktree_base_branch,
+      merged.latest_commit,
+      merged.pr_number,
+      merged.pr_url,
       merged.updated_at,
       id,
       projectId
@@ -568,6 +591,7 @@ export function updateSession(
     result_decisions: string | null;
     result_blockers: string | null;
     result_next_steps: string | null;
+    result_commits: string | null;
   }>
 ): Session | null {
   const existing = getSession(projectId, id);
@@ -576,7 +600,7 @@ export function updateSession(
   db()
     .prepare(
       `UPDATE sessions SET status = ?, current_step = ?, output = ?, exit_code = ?, ended_at = ?,
-       result_summary = ?, result_status = ?, result_files = ?, result_decisions = ?, result_blockers = ?, result_next_steps = ?
+       result_summary = ?, result_status = ?, result_files = ?, result_decisions = ?, result_blockers = ?, result_next_steps = ?, result_commits = ?
        WHERE id = ? AND project_id = ?`
     )
     .run(
@@ -591,6 +615,7 @@ export function updateSession(
       merged.result_decisions,
       merged.result_blockers,
       merged.result_next_steps,
+      merged.result_commits,
       id,
       projectId
     );
@@ -935,6 +960,8 @@ export type HandoffRecord = {
   decisions: string;
   blockers: string;
   next_steps: string;
+  commit_sha: string | null;
+  branch: string | null;
   status: HandoffStatus;
   created_at: number;
   consumed_at: number | null;
@@ -952,6 +979,8 @@ export type Handoff = {
   decisions: string[];
   blockers: string[];
   next_steps: string[];
+  commit_sha?: string | null;
+  branch?: string | null;
   status: HandoffStatus;
   created_at: number;
   consumed_at: number | null;
@@ -974,6 +1003,8 @@ export function deserializeHandoff(row: HandoffRecord): Handoff {
     decisions: Array.isArray(decisions) ? decisions : [],
     blockers: Array.isArray(blockers) ? blockers : [],
     next_steps: Array.isArray(next_steps) ? next_steps : [],
+    commit_sha: row.commit_sha ?? null,
+    branch: row.branch ?? null,
   };
 }
 
@@ -997,6 +1028,8 @@ export function createHandoff(
     decisions?: string[];
     blockers?: string[];
     next_steps?: string[];
+    commit_sha?: string | null;
+    branch?: string | null;
     status?: HandoffStatus;
   }
 ): Handoff {
@@ -1011,8 +1044,8 @@ export function createHandoff(
       `INSERT INTO handoffs (
         id, project_id, source_session_id, source_task_id, target_task_id,
         summary, completed_work, changed_files, decisions, blockers, next_steps,
-        status, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        commit_sha, branch, status, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       input.id,
@@ -1026,6 +1059,8 @@ export function createHandoff(
       decisionsJson,
       blockersJson,
       nextStepsJson,
+      input.commit_sha ?? null,
+      input.branch ?? null,
       input.status ?? "pending",
       t
     );

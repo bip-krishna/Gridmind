@@ -413,7 +413,12 @@ function eventMeta(type: string, payload: Record<string, unknown>): { label: str
       };
     }
     case "git:commit":
-      return { label: "commit", detail: String(payload.branch ?? ""), sub: String(payload.message ?? ""), dot: "bg-green" };
+      return {
+        label: "commit",
+        detail: String(payload.branch ?? ""),
+        sub: payload.commit_sha ? `sha: ${String(payload.commit_sha).slice(0, 7)}` : String(payload.message ?? ""),
+        dot: "bg-green",
+      };
     case "git:branch-created":
       return { label: "branch created", detail: String(payload.branch ?? ""), dot: "bg-cyan" };
     case "git:branch-checkout":
@@ -442,8 +447,14 @@ function eventMeta(type: string, payload: Record<string, unknown>): { label: str
       return { label: "decision", detail: String(payload.title ?? ""), dot: "bg-purple" };
     case "issue:imported":
       return { label: "issue imported", detail: `#${String(payload.issueNumber ?? "")}`, dot: "bg-amber" };
+    case "github:pr_created":
     case "pr:created":
-      return { label: "PR created", detail: `#${String(payload.number ?? "")}`, dot: "bg-green" };
+      return {
+        label: "PR created",
+        detail: `#${String(payload.pr_number ?? payload.number ?? "")}`,
+        sub: String(payload.head_branch ?? ""),
+        dot: "bg-green",
+      };
     case "agentsetup:master":
       return { label: "master set", detail: String(payload.agentType ?? ""), sub: String(payload.name ?? ""), dot: "bg-purple" };
     case "agentsetup:change": {

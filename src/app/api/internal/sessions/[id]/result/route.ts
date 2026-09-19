@@ -25,6 +25,7 @@ export async function POST(
     decisions?: string[];
     blockers?: string[];
     next_steps?: string[];
+    commits?: Array<{ sha: string; message?: string } | string>;
   };
 
   const patch: Record<string, string | null> = {};
@@ -34,6 +35,7 @@ export async function POST(
   if (body.decisions !== undefined) patch.result_decisions = JSON.stringify(body.decisions);
   if (body.blockers !== undefined) patch.result_blockers = JSON.stringify(body.blockers);
   if (body.next_steps !== undefined) patch.result_next_steps = JSON.stringify(body.next_steps);
+  if (body.commits !== undefined) patch.result_commits = JSON.stringify(body.commits);
 
   if (Object.keys(patch).length === 0) {
     return NextResponse.json({ error: "no result fields provided" }, { status: 400 });
@@ -53,6 +55,7 @@ export async function POST(
       result_decisions: updated.result_decisions ? JSON.parse(updated.result_decisions) : null,
       result_blockers: updated.result_blockers ? JSON.parse(updated.result_blockers) : null,
       result_next_steps: updated.result_next_steps ? JSON.parse(updated.result_next_steps) : null,
+      result_commits: updated.result_commits ? JSON.parse(updated.result_commits) : null,
     },
   });
 }

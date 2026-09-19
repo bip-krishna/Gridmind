@@ -124,6 +124,28 @@ export async function POST(req: Request) {
   const nextStepsVal = validateStringArray(body.next_steps, "next_steps", 20, 500);
   if (!nextStepsVal.ok) return NextResponse.json({ error: nextStepsVal.error }, { status: 400 });
 
+  let commitSha: string | null = null;
+  if (body.commit_sha !== undefined && body.commit_sha !== null) {
+    if (typeof body.commit_sha !== "string") {
+      return NextResponse.json({ error: "commit_sha must be a string" }, { status: 400 });
+    }
+    commitSha = body.commit_sha.trim();
+    if (commitSha.length > 40) {
+      return NextResponse.json({ error: "commit_sha cannot exceed 40 characters" }, { status: 400 });
+    }
+  }
+
+  let branch: string | null = null;
+  if (body.branch !== undefined && body.branch !== null) {
+    if (typeof body.branch !== "string") {
+      return NextResponse.json({ error: "branch must be a string" }, { status: 400 });
+    }
+    branch = body.branch.trim();
+    if (branch.length > 100) {
+      return NextResponse.json({ error: "branch cannot exceed 100 characters" }, { status: 400 });
+    }
+  }
+
   const handoffId = nanoid(14);
   const handoff = createHandoff(auth.session.project_id, {
     id: handoffId,
@@ -136,6 +158,8 @@ export async function POST(req: Request) {
     decisions: decisionsVal.items,
     blockers: blockersVal.items,
     next_steps: nextStepsVal.items,
+    commit_sha: commitSha,
+    branch,
     status: "pending",
   });
 

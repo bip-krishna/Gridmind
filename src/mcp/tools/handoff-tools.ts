@@ -18,8 +18,10 @@ export function registerHandoffTools(server: McpServer, client: GridMindClient) 
       decisions: z.array(z.string().max(500)).max(20).optional().describe("Key architectural or technical decisions made"),
       blockers: z.array(z.string().max(500)).max(20).optional().describe("Known blockers or dependencies for the receiving agent"),
       next_steps: z.array(z.string().max(500)).max(20).optional().describe("Recommended next steps for the receiving task"),
+      commit_sha: z.string().max(40).optional().describe("Optional Git commit SHA associated with this handoff"),
+      branch: z.string().max(100).optional().describe("Optional branch name associated with this handoff"),
     },
-    async ({ target_task_id, summary, completed_work, changed_files, decisions, blockers, next_steps }) => {
+    async ({ target_task_id, summary, completed_work, changed_files, decisions, blockers, next_steps, commit_sha, branch }) => {
       try {
         const result = await client.createHandoff({
           targetTaskId: target_task_id,
@@ -29,6 +31,8 @@ export function registerHandoffTools(server: McpServer, client: GridMindClient) 
           decisions,
           blockers,
           nextSteps: next_steps,
+          commitSha: commit_sha,
+          branch,
         });
         return {
           content: [

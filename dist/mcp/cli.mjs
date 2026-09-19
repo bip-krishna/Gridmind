@@ -42337,7 +42337,9 @@ var GridMindClient = class {
       changed_files: input2.changedFiles,
       decisions: input2.decisions,
       blockers: input2.blockers,
-      next_steps: input2.nextSteps
+      next_steps: input2.nextSteps,
+      commit_sha: input2.commitSha,
+      branch: input2.branch
     });
   }
   /**
@@ -42355,6 +42357,92 @@ var GridMindClient = class {
    */
   async acceptHandoff(handoffId) {
     return this.request("POST", `/api/internal/handoffs/${encodeURIComponent(handoffId)}/accept`);
+  }
+  /**
+   * Stage 5C: Git status of the authenticated task worktree.
+   */
+  async gitStatus(options) {
+    return this.request("POST", "/api/internal/git/status", {
+      task_id: options?.taskId
+    });
+  }
+  /**
+   * Stage 5C: Git diff with path traversal protection and output bounding.
+   */
+  async gitDiff(options) {
+    return this.request("POST", "/api/internal/git/diff", {
+      path: options?.path,
+      staged: options?.staged,
+      commit: options?.commit,
+      task_id: options?.taskId
+    });
+  }
+  /**
+   * Stage 5C: Git commit of authenticated worktree changes.
+   */
+  async gitCommit(input2) {
+    return this.request("POST", "/api/internal/git/commit", {
+      message: input2.message,
+      task_id: input2.taskId
+    });
+  }
+  /**
+   * Stage 5C: List branches in repository/worktree.
+   */
+  async gitBranches(options) {
+    const query = options?.taskId ? `?task_id=${encodeURIComponent(options.taskId)}` : "";
+    return this.request("GET", `/api/internal/git/branches${query}`);
+  }
+  /**
+   * Stage 5C: Bounded git log of recent commits.
+   */
+  async gitLog(options) {
+    return this.request("POST", "/api/internal/git/log", {
+      limit: options?.limit,
+      commit: options?.commit,
+      task_id: options?.taskId
+    });
+  }
+  /**
+   * Stage 5C: List project repository GitHub issues.
+   */
+  async githubIssues(options) {
+    const query = options?.limit ? `?limit=${encodeURIComponent(options.limit)}` : "";
+    return this.request("GET", `/api/internal/github/issues${query}`);
+  }
+  /**
+   * Stage 5C: Create GitHub Pull Request from task branch.
+   */
+  async githubCreatePr(input2) {
+    return this.request("POST", "/api/internal/github/pr", {
+      title: input2.title,
+      body: input2.body,
+      head_branch: input2.headBranch,
+      base_branch: input2.baseBranch,
+      task_id: input2.taskId
+    });
+  }
+  /**
+   * Stage 5C: Convert GitHub issue to GridMind task.
+   */
+  async githubIssueToTask(issueNumber) {
+    return this.request("POST", "/api/internal/github/issue-to-task", {
+      issue_number: issueNumber
+    });
+  }
+  /**
+   * Stage 5C: Record structured task execution result for current session.
+   */
+  async reportResult(sessionId, input2) {
+    return this.request("POST", `/api/internal/sessions/${encodeURIComponent(sessionId)}/result`, {
+      summary: input2.summary,
+      status: input2.status,
+      files: input2.files,
+      decisions: input2.decisions,
+      blockers: input2.blockers,
+      next_steps: input2.nextSteps,
+      commits: input2.commits
+    });
   }
 };
 
@@ -42622,9 +42710,11 @@ function registerHandoffTools(server, client) {
       changed_files: external_exports.array(external_exports.string().max(200)).max(50).optional().describe("List of modified or created file paths"),
       decisions: external_exports.array(external_exports.string().max(500)).max(20).optional().describe("Key architectural or technical decisions made"),
       blockers: external_exports.array(external_exports.string().max(500)).max(20).optional().describe("Known blockers or dependencies for the receiving agent"),
-      next_steps: external_exports.array(external_exports.string().max(500)).max(20).optional().describe("Recommended next steps for the receiving task")
+      next_steps: external_exports.array(external_exports.string().max(500)).max(20).optional().describe("Recommended next steps for the receiving task"),
+      commit_sha: external_exports.string().max(40).optional().describe("Optional Git commit SHA associated with this handoff"),
+      branch: external_exports.string().max(100).optional().describe("Optional branch name associated with this handoff")
     },
-    async ({ target_task_id, summary, completed_work, changed_files, decisions, blockers, next_steps }) => {
+    async ({ target_task_id, summary, completed_work, changed_files, decisions, blockers, next_steps, commit_sha, branch }) => {
       try {
         const result = await client.createHandoff({
           targetTaskId: target_task_id,
@@ -42633,7 +42723,9 @@ function registerHandoffTools(server, client) {
           changedFiles: changed_files,
           decisions,
           blockers,
-          nextSteps: next_steps
+          nextSteps: next_steps,
+          commitSha: commit_sha,
+          branch
         });
         return {
           content: [
@@ -42707,6 +42799,238 @@ function registerHandoffTools(server, client) {
   );
 }
 
+// src/mcp/tools/git-tools.ts
+function registerGitTools(server, client) {
+  server.tool(
+    "gridmind_git_status",
+    "Inspect the Git status (branch, clean/dirty, changed files, untracked files, ahead/behind) of the authenticated task worktree.",
+    {
+      task_id: external_exports.string().optional().describe("Task ID (only for master role; workers automatically use assigned task worktree)")
+    },
+    async ({ task_id }) => {
+      try {
+        const result = await client.gitStatus({ taskId: task_id });
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(result, null, 2)
+            }
+          ]
+        };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        return {
+          isError: true,
+          content: [{ type: "text", text: `Git status failed: ${message}` }]
+        };
+      }
+    }
+  );
+  server.tool(
+    "gridmind_git_diff",
+    "View bounded diff of the authenticated task worktree. Supports optional relative file path, staged changes, or a specific commit SHA.",
+    {
+      path: external_exports.string().optional().describe("Optional relative file path inside the worktree (path traversal is forbidden)"),
+      staged: external_exports.boolean().optional().describe("If true, show staged changes; if false/omitted, show unstaged working tree changes"),
+      commit: external_exports.string().optional().describe("Optional commit SHA to inspect diff for (e.g. referenced from a handoff)"),
+      task_id: external_exports.string().optional().describe("Task ID (only for master role; workers automatically use assigned task worktree)")
+    },
+    async ({ path, staged, commit, task_id }) => {
+      try {
+        const result = await client.gitDiff({ path, staged, commit, taskId: task_id });
+        return {
+          content: [
+            {
+              type: "text",
+              text: result.diff || (staged ? "(no staged changes)" : "(no working tree changes)")
+            }
+          ]
+        };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        return {
+          isError: true,
+          content: [{ type: "text", text: `Git diff failed: ${message}` }]
+        };
+      }
+    }
+  );
+  server.tool(
+    "gridmind_git_commit",
+    "Stage and commit all working changes in the authenticated task worktree. Publishes git:commit event and records commit metadata in GridMind.",
+    {
+      message: external_exports.string().min(1).max(500).describe("Commit message describing the completed changes"),
+      task_id: external_exports.string().optional().describe("Task ID (only for master role; workers automatically use assigned task worktree)")
+    },
+    async ({ message, task_id }) => {
+      try {
+        const result = await client.gitCommit({ message, taskId: task_id });
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(result, null, 2)
+            }
+          ]
+        };
+      } catch (err) {
+        const message2 = err instanceof Error ? err.message : String(err);
+        return {
+          isError: true,
+          content: [{ type: "text", text: `Git commit failed: ${message2}` }]
+        };
+      }
+    }
+  );
+  server.tool(
+    "gridmind_git_branches",
+    "List repository branches and view current branch for the authenticated task worktree.",
+    {
+      task_id: external_exports.string().optional().describe("Task ID (only for master role; workers automatically use assigned task worktree)")
+    },
+    async ({ task_id }) => {
+      try {
+        const result = await client.gitBranches({ taskId: task_id });
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(result, null, 2)
+            }
+          ]
+        };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        return {
+          isError: true,
+          content: [{ type: "text", text: `Git branches failed: ${message}` }]
+        };
+      }
+    }
+  );
+  server.tool(
+    "gridmind_git_log",
+    "Inspect a bounded list of recent Git commits (SHA, message, author, date) in the authenticated worktree.",
+    {
+      limit: external_exports.number().int().min(1).max(50).optional().describe("Number of commits to retrieve (default: 10, max: 50)"),
+      commit: external_exports.string().optional().describe("Optional commit SHA to inspect a single commit"),
+      task_id: external_exports.string().optional().describe("Task ID (only for master role; workers automatically use assigned task worktree)")
+    },
+    async ({ limit, commit, task_id }) => {
+      try {
+        const result = await client.gitLog({ limit, commit, taskId: task_id });
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(result, null, 2)
+            }
+          ]
+        };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        return {
+          isError: true,
+          content: [{ type: "text", text: `Git log failed: ${message}` }]
+        };
+      }
+    }
+  );
+}
+
+// src/mcp/tools/github-tools.ts
+function registerGithubTools(server, client) {
+  server.tool(
+    "gridmind_github_issues",
+    "List issues from the project-configured GitHub repository. Repository is governed by project configuration; arbitrary repository injection is rejected.",
+    {
+      limit: external_exports.number().int().min(1).max(50).optional().describe("Maximum issues to return (default: 30, max: 50)")
+    },
+    async ({ limit }) => {
+      try {
+        const result = await client.githubIssues({ limit });
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(result, null, 2)
+            }
+          ]
+        };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        return {
+          isError: true,
+          content: [{ type: "text", text: `GitHub issues lookup failed: ${message}` }]
+        };
+      }
+    }
+  );
+  server.tool(
+    "gridmind_github_create_pr",
+    "Create a GitHub Pull Request for the task branch against the project-configured repository. Project configuration governs owner/repo; tokens are never exposed.",
+    {
+      title: external_exports.string().min(1).max(200).describe("Pull request title"),
+      body: external_exports.string().max(4e3).optional().describe("Pull request description / summary of changes"),
+      head_branch: external_exports.string().min(1).describe("The branch containing your commits (e.g. task worktree branch)"),
+      base_branch: external_exports.string().optional().describe("Target base branch (default: main)"),
+      task_id: external_exports.string().optional().describe("Task ID (only for master role; workers automatically use assigned task)")
+    },
+    async ({ title, body, head_branch, base_branch, task_id }) => {
+      try {
+        const result = await client.githubCreatePr({
+          title,
+          body,
+          headBranch: head_branch,
+          baseBranch: base_branch,
+          taskId: task_id
+        });
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(result, null, 2)
+            }
+          ]
+        };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        return {
+          isError: true,
+          content: [{ type: "text", text: `Failed to create pull request: ${message}` }]
+        };
+      }
+    }
+  );
+  server.tool(
+    "gridmind_github_issue_to_task",
+    "Import a GitHub issue from the project-configured repository and create a new linked GridMind task.",
+    {
+      issue_number: external_exports.number().int().positive().describe("GitHub issue number to convert into a GridMind task")
+    },
+    async ({ issue_number }) => {
+      try {
+        const result = await client.githubIssueToTask(issue_number);
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(result, null, 2)
+            }
+          ]
+        };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        return {
+          isError: true,
+          content: [{ type: "text", text: `Failed to import issue to task: ${message}` }]
+        };
+      }
+    }
+  );
+}
+
 // src/mcp/server.ts
 function createGridMindMcpServer(options) {
   const server = new McpServer({
@@ -42717,6 +43041,8 @@ function createGridMindMcpServer(options) {
   registerReadTools(server, client);
   registerWriteTools(server, client);
   registerHandoffTools(server, client);
+  registerGitTools(server, client);
+  registerGithubTools(server, client);
   return server;
 }
 

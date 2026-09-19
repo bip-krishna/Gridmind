@@ -298,6 +298,8 @@ export class GridMindClient {
     decisions?: string[];
     blockers?: string[];
     nextSteps?: string[];
+    commitSha?: string;
+    branch?: string;
   }) {
     return this.request<{
       ok: boolean;
@@ -313,6 +315,8 @@ export class GridMindClient {
         decisions: string[];
         blockers: string[];
         next_steps: string[];
+        commit_sha?: string | null;
+        branch?: string | null;
         status: string;
         created_at: number;
         consumed_at: number | null;
@@ -325,6 +329,8 @@ export class GridMindClient {
       decisions: input.decisions,
       blockers: input.blockers,
       next_steps: input.nextSteps,
+      commit_sha: input.commitSha,
+      branch: input.branch,
     });
   }
 
@@ -351,6 +357,8 @@ export class GridMindClient {
         decisions: string[];
         blockers: string[];
         next_steps: string[];
+        commit_sha?: string | null;
+        branch?: string | null;
         status: string;
         created_at: number;
         consumed_at: number | null;
@@ -376,11 +384,206 @@ export class GridMindClient {
         decisions: string[];
         blockers: string[];
         next_steps: string[];
+        commit_sha?: string | null;
+        branch?: string | null;
         status: string;
         created_at: number;
         consumed_at: number | null;
       };
       already_accepted?: boolean;
     }>("POST", `/api/internal/handoffs/${encodeURIComponent(handoffId)}/accept`);
+  }
+
+  /**
+   * Stage 5C: Git status of the authenticated task worktree.
+   */
+  async gitStatus(options?: { taskId?: string }) {
+    return this.request<{
+      ok: boolean;
+      branch: string;
+      clean: boolean;
+      dirty: boolean;
+      changed_files: string[];
+      untracked_files: string[];
+      changed_files_count: number;
+      untracked_files_count: number;
+      ahead_behind: string;
+      truncated: boolean;
+    }>("POST", "/api/internal/git/status", {
+      task_id: options?.taskId,
+    });
+  }
+
+  /**
+   * Stage 5C: Git diff with path traversal protection and output bounding.
+   */
+  async gitDiff(options?: { path?: string; staged?: boolean; commit?: string; taskId?: string }) {
+    return this.request<{
+      ok: boolean;
+      diff: string;
+      truncated: boolean;
+      length: number;
+    }>("POST", "/api/internal/git/diff", {
+      path: options?.path,
+      staged: options?.staged,
+      commit: options?.commit,
+      task_id: options?.taskId,
+    });
+  }
+
+  /**
+   * Stage 5C: Git commit of authenticated worktree changes.
+   */
+  async gitCommit(input: { message: string; taskId?: string }) {
+    return this.request<{
+      ok: boolean;
+      commit_sha: string;
+      short_sha: string;
+      message: string;
+      branch: string;
+    }>("POST", "/api/internal/git/commit", {
+      message: input.message,
+      task_id: input.taskId,
+    });
+  }
+
+  /**
+   * Stage 5C: List branches in repository/worktree.
+   */
+  async gitBranches(options?: { taskId?: string }) {
+    const query = options?.taskId ? `?task_id=${encodeURIComponent(options.taskId)}` : "";
+    return this.request<{
+      ok: boolean;
+      current: string;
+      branches: string[];
+      total: number;
+      truncated: boolean;
+    }>("GET", `/api/internal/git/branches${query}`);
+  }
+
+  /**
+   * Stage 5C: Bounded git log of recent commits.
+   */
+  async gitLog(options?: { limit?: number; commit?: string; taskId?: string }) {
+    return this.request<{
+      ok: boolean;
+      commits: Array<{
+        sha: string;
+        short_sha: string;
+        message: string;
+        author: string;
+        date: string;
+      }>;
+      count: number;
+      limit: number;
+    }>("POST", "/api/internal/git/log", {
+      limit: options?.limit,
+      commit: options?.commit,
+      task_id: options?.taskId,
+    });
+  }
+
+  /**
+   * Stage 5C: List project repository GitHub issues.
+   */
+  async githubIssues(options?: { limit?: number }) {
+    const query = options?.limit ? `?limit=${encodeURIComponent(options.limit)}` : "";
+    return this.request<{
+      ok: boolean;
+      configured: boolean;
+      repository?: string;
+      issues: Array<{
+        number: number;
+        title: string;
+        state: string;
+        url: string;
+        labels: string[];
+        created_at: string;
+      }>;
+      count?: number;
+      truncated?: boolean;
+      message?: string;
+    }>("GET", `/api/internal/github/issues${query}`);
+  }
+
+  /**
+   * Stage 5C: Create GitHub Pull Request from task branch.
+   */
+  async githubCreatePr(input: {
+    title: string;
+    body?: string;
+    headBranch: string;
+    baseBranch?: string;
+    taskId?: string;
+  }) {
+    return this.request<{
+      ok: boolean;
+      pr_number: number;
+      url: string;
+      title: string;
+      head: string;
+      base: string;
+      repository: string;
+    }>("POST", "/api/internal/github/pr", {
+      title: input.title,
+      body: input.body,
+      head_branch: input.headBranch,
+      base_branch: input.baseBranch,
+      task_id: input.taskId,
+    });
+  }
+
+  /**
+   * Stage 5C: Convert GitHub issue to GridMind task.
+   */
+  async githubIssueToTask(issueNumber: number) {
+    return this.request<{
+      ok: boolean;
+      task: {
+        id: string;
+        project_id: string;
+        title: string;
+        description: string;
+        status: string;
+        priority: string;
+        issue_number: number;
+      };
+    }>("POST", "/api/internal/github/issue-to-task", {
+      issue_number: issueNumber,
+    });
+  }
+
+  /**
+   * Stage 5C: Record structured task execution result for current session.
+   */
+  async reportResult(sessionId: string, input: {
+    summary?: string;
+    status?: string;
+    files?: string[];
+    decisions?: string[];
+    blockers?: string[];
+    nextSteps?: string[];
+    commits?: Array<{ sha: string; message?: string } | string>;
+  }) {
+    return this.request<{
+      session: {
+        id: string;
+        result_summary: string | null;
+        result_status: string | null;
+        result_files: string[] | null;
+        result_decisions: string[] | null;
+        result_blockers: string[] | null;
+        result_next_steps: string[] | null;
+        result_commits: Array<{ sha: string; message?: string } | string> | null;
+      };
+    }>("POST", `/api/internal/sessions/${encodeURIComponent(sessionId)}/result`, {
+      summary: input.summary,
+      status: input.status,
+      files: input.files,
+      decisions: input.decisions,
+      blockers: input.blockers,
+      next_steps: input.nextSteps,
+      commits: input.commits,
+    });
   }
 }

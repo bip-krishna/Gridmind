@@ -38,6 +38,14 @@ export function formatHandoffBlock(handoff: Handoff, sourceTaskTitle?: string): 
   lines.push("Completed:");
   lines.push(sanitizeMemoryContent(handoff.completed_work));
 
+  if (handoff.commit_sha) {
+    lines.push("");
+    lines.push(`Commit: ${sanitizeMemoryContent(handoff.commit_sha)}`);
+  }
+  if (handoff.branch) {
+    lines.push(`Branch: ${sanitizeMemoryContent(handoff.branch)}`);
+  }
+
   if (handoff.changed_files && handoff.changed_files.length > 0) {
     lines.push("");
     lines.push("Changed files:");

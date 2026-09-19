@@ -42256,6 +42256,14 @@ var GridMindClient = class {
    * 4. Record persistent memory into GridMind.
    */
   async recordMemory(input2) {
+    let effectiveTaskId = input2.taskId;
+    if (input2.scope === "task" && !effectiveTaskId) {
+      const sessionCtx = await this.getSessionContext();
+      if (!sessionCtx.task_id) {
+        throw new GridMindApiError(400, "No task is assigned to this session for task-scoped memory");
+      }
+      effectiveTaskId = sessionCtx.task_id;
+    }
     const formattedContent = input2.title?.trim() ? `${input2.title.trim()}: ${input2.content.trim()}` : input2.content.trim();
     return this.request("POST", "/api/internal/memory", {
       scope: input2.scope,
@@ -42263,7 +42271,7 @@ var GridMindClient = class {
       content: formattedContent,
       importance: input2.importance ?? 1,
       source: "agent",
-      task_id: input2.taskId
+      task_id: effectiveTaskId
     });
   }
   /**
@@ -42548,7 +42556,7 @@ function registerWriteTools(server, client) {
     {
       type: external_exports.enum(["agent:status", "agent:progress", "agent:decision", "agent:result"]).describe("Event type"),
       message: external_exports.string().optional().describe("Optional status message"),
-      payload: external_exports.record(external_exports.unknown()).optional().describe("Optional structured metadata object")
+      payload: external_exports.record(external_exports.string(), external_exports.unknown()).optional().describe("Optional structured metadata object")
     },
     async ({ type, message, payload }) => {
       try {

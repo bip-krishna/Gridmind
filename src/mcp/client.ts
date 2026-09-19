@@ -160,6 +160,15 @@ export class GridMindClient {
     importance?: number;
     taskId?: string;
   }) {
+    let effectiveTaskId = input.taskId;
+    if (input.scope === "task" && !effectiveTaskId) {
+      const sessionCtx = await this.getSessionContext();
+      if (!sessionCtx.task_id) {
+        throw new GridMindApiError(400, "No task is assigned to this session for task-scoped memory");
+      }
+      effectiveTaskId = sessionCtx.task_id;
+    }
+
     const formattedContent = input.title?.trim()
       ? `${input.title.trim()}: ${input.content.trim()}`
       : input.content.trim();
@@ -182,7 +191,7 @@ export class GridMindClient {
       content: formattedContent,
       importance: input.importance ?? 1,
       source: "agent",
-      task_id: input.taskId,
+      task_id: effectiveTaskId,
     });
   }
 

@@ -26,11 +26,12 @@ export function fmtDate(ts: number | null | undefined): string {
   return new Date(ts).toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" });
 }
 
-export function extractRepoName(repoPath: string): string {
+export function extractRepoName(repoPath: string | null | undefined): string {
+  if (!repoPath) return "";
   return repoPath.split("/").filter(Boolean).pop() ?? repoPath;
 }
 
-export function gitRemoteDisplay(remote: string | null): string {
+export function gitRemoteDisplay(remote: string | null | undefined): string {
   if (!remote) return "no remote";
   return remote.replace(/^git@github\.com:/, "").replace(/^https:\/\/github\.com\//, "").replace(/\.git$/, "");
 }
@@ -55,21 +56,23 @@ export function taskStatusTone(status: string): "accent" | "green" | "amber" | "
   }
 }
 
-export function agentTone(type: string): "accent" | "cyan" | "purple" | "dim" {
+export function agentTone(type: string): "accent" | "green" | "dim" {
   switch (type) {
     case "opencode":
-      return "cyan";
+      return "green";
     case "codex":
+      return "accent";
+    case "hermes":
       return "accent";
     default:
       return "dim";
   }
 }
 
-export function sessionStatusTone(status: string): "green" | "red" | "amber" | "cyan" | "dim" {
+export function sessionStatusTone(status: string): "green" | "red" | "amber" | "dim" {
   switch (status) {
     case "running":
-      return "cyan";
+      return "amber";
     case "done":
       return "green";
     case "error":

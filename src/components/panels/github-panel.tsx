@@ -84,16 +84,17 @@ export function GithubPanel({ projectId, refreshKey }: { projectId: string; refr
 
   return (
     <div className="flex flex-col gap-4">
+      {/* Connection status */}
       <Card>
         <CardHeader
-          title="GitHub integration"
+          title="GitHub Integration"
           subtitle={
             state.configured
               ? `linked to ${state.githubRepo ?? "repo"}`
-              : "not configured — set GITHUB_TOKEN (and project github_repo) to enable"
+              : "not configured — set GITHUB_TOKEN and project github_repo to enable"
           }
           right={
-            !state.configured && <Badge tone="amber">needs GITHUB_TOKEN</Badge>
+            !state.configured ? <Badge tone="amber">needs GITHUB_TOKEN</Badge> : <Badge tone="green">connected</Badge>
           }
         />
         <div className="p-4">
@@ -102,15 +103,16 @@ export function GithubPanel({ projectId, refreshKey }: { projectId: string; refr
             <code className="font-mono text-fg-muted">GITHUB_TOKEN</code> in the environment and set the repo as{" "}
             <code className="font-mono text-fg-muted">owner/repo</code>.
           </p>
-          <div className="rounded-md border border-border-strong bg-bg-subtle px-3 py-2 font-mono text-[11px] text-fg-muted">
+          <div className="rounded-md border border-border bg-bg-subtle px-3 py-2 font-mono text-[11px] text-fg-muted">
             {state.githubRepo ?? "no owner/repo set on this project"}
           </div>
         </div>
       </Card>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        {/* Issues */}
         <Card>
-          <CardHeader title="Open issues" subtitle={`${state.issues.length} open`} />
+          <CardHeader title="Open Issues" subtitle={`${state.issues.length} open`} />
           <div className="p-2">
             {state.issues.length === 0 ? (
               <Empty
@@ -120,24 +122,26 @@ export function GithubPanel({ projectId, refreshKey }: { projectId: string; refr
             ) : (
               <div className="flex flex-col">
                 {state.issues.map((i) => (
-                  <div key={i.number} className="flex items-start gap-3 rounded-lg border border-transparent px-2.5 py-2 hover:border-border hover:bg-bg-subtle/50 transition-colors">
+                  <div key={i.number} className="flex items-start gap-3 rounded-md border border-transparent px-2.5 py-2 hover:border-border hover:bg-bg-subtle/50 transition-colors">
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2">
                         <Badge tone="amber">#{i.number}</Badge>
                         <span className="truncate text-[12px] font-medium text-fg">{i.title}</span>
                       </div>
-                      <div className="mt-1 flex flex-wrap gap-1">
-                        {i.labels.map((l) => (
-                          <span key={l} className="rounded bg-bg-subtle px-1.5 py-0.5 text-[9px] text-fg-muted border border-border">
-                            {l}
-                          </span>
-                        ))}
-                      </div>
+                      {i.labels.length > 0 && (
+                        <div className="mt-1 flex flex-wrap gap-1">
+                          {i.labels.map((l) => (
+                            <span key={l} className="rounded bg-bg-subtle px-1.5 py-0.5 text-[9px] text-fg-muted border border-border">
+                              {l}
+                            </span>
+                          ))}
+                        </div>
+                      )}
                     </div>
                     <Button variant="outline" size="xs" onClick={() => importIssue(i.number)} disabled={busy}>
                       → task
                     </Button>
-                    <a href={i.url} target="_blank" rel="noreferrer" className="mt-1 text-fg-dim hover:text-fg">
+                    <a href={i.url} target="_blank" rel="noreferrer" className="mt-1 text-fg-dim hover:text-fg" aria-label={`Open issue #${i.number} on GitHub`}>
                       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                         <path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6M15 3h6v6M10 14L21 3" />
                       </svg>
@@ -149,13 +153,14 @@ export function GithubPanel({ projectId, refreshKey }: { projectId: string; refr
           </div>
         </Card>
 
+        {/* PR creation */}
         <Card>
-          <CardHeader title="One-click PR" subtitle="From the selected branch" />
+          <CardHeader title="Create Pull Request" subtitle="From the selected branch" />
           <div className="p-4">
             <div className="grid grid-cols-2 gap-4">
               <Field label="Head branch">
                 <select
-                  className="h-8 w-full rounded-md border border-border-strong bg-bg px-2 text-xs text-fg cursor-pointer"
+                  className="h-8 w-full rounded-md border border-border bg-bg-subtle px-2 text-xs text-fg font-mono cursor-pointer"
                   value={prHead}
                   onChange={(e) => setPrHead(e.target.value)}
                 >
@@ -167,7 +172,7 @@ export function GithubPanel({ projectId, refreshKey }: { projectId: string; refr
                 </select>
               </Field>
               <Field label="Base branch">
-                <select className="h-8 w-full rounded-md border border-border-strong bg-bg px-2 text-xs text-fg cursor-pointer">
+                <select className="h-8 w-full rounded-md border border-border bg-bg-subtle px-2 text-xs text-fg font-mono cursor-pointer">
                   <option>main</option>
                   <option>master</option>
                 </select>
@@ -189,7 +194,7 @@ export function GithubPanel({ projectId, refreshKey }: { projectId: string; refr
                   type="checkbox"
                   checked={pushBranches}
                   onChange={(e) => setPushBranches(e.target.checked)}
-                  className="accent-[#7c8cf8]"
+                  className="accent-fg"
                 />
                 Push branch first (git push -u origin {prHead})
               </label>

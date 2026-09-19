@@ -2,7 +2,20 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Badge, Button, Card, CardHeader, Dot, Field, Input, Select, Spinner } from "@/components/ui";
-import { TeamGraph, MiniChain } from "@/components/topology";
+import dynamic from "next/dynamic";
+import { MiniChain } from "@/components/topology";
+
+const TeamGraph = dynamic(
+  () => import("@/components/topology").then((m) => m.TeamGraph),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex h-[320px] w-full items-center justify-center rounded-lg border border-border bg-bg-elevated text-[11px] text-fg-dim animate-pulse">
+        Initializing canvas…
+      </div>
+    ),
+  }
+);
 import { composeTopologyCards, AGENT_ROLE_LABEL, type AgentCardInfo } from "@/lib/topology";
 import { cn, agentTone } from "@/lib/utils";
 import type { AgentRole } from "@/lib/db";
@@ -193,7 +206,7 @@ export function AgentSetupPanel({
           <CardHeader
             title="Master / Orchestrator"
             subtitle="Coordinates tasks, reads context, assigns work, reviews output."
-            right={master ? <Badge tone="purple">{master.agent_type}</Badge> : <Badge tone="amber">not set</Badge>}
+            right={master ? <Badge tone="accent">{master.agent_type}</Badge> : <Badge tone="amber">not set</Badge>}
           />
           <div className="flex flex-col gap-4 p-4">
             {master && masterCard && (
@@ -319,7 +332,7 @@ export function AgentSetupPanel({
         <CardHeader
           title="Auto-assignment flow"
           subtitle="Tasks marked “Auto / Master” route through the configured master, which dispatches them to the team."
-          right={autoTasks.length > 0 ? <Badge tone="purple">{autoTasks.length} queued</Badge> : undefined}
+          right={autoTasks.length > 0 ? <Badge tone="accent">{autoTasks.length} queued</Badge> : undefined}
         />
         <div className="grid grid-cols-1 gap-4 p-4 md:grid-cols-2">
           {autoTasks.length === 0 ? (
@@ -393,7 +406,7 @@ function SubagentRow({
           </button>
         )}
         <div className="mt-0.5 flex items-center gap-2 text-[10px] text-fg-dim">
-          <Badge tone={agent.role === "reviewer" ? "cyan" : agentTone(agent.agent_type)}>{AGENT_ROLE_LABEL[agent.role]}</Badge>
+          <Badge tone={agent.role === "reviewer" ? "accent" : agentTone(agent.agent_type)}>{AGENT_ROLE_LABEL[agent.role]}</Badge>
           <span className="font-mono normal-case">{agent.agent_type}</span>
           <span>{card?.connected ? "connected" : "disconnected"}</span>
           {card?.taskTitle && <span className="truncate">· {card.taskTitle}</span>}

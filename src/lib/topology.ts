@@ -8,7 +8,7 @@ export type AgentCardInfo = {
   connected: boolean;
   working: boolean;
   statusLabel: string;
-  statusTone: "green" | "amber" | "dim" | "cyan";
+  statusTone: "green" | "amber" | "dim";
   taskTitle: string | null;
   branch: string | null;
   sessionId: string | null;

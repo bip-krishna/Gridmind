@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Badge, Button, Card, CardHeader, Confirmation, CopyButton, Empty, Field, Input, Spinner } from "@/components/ui";
-import { gitRemoteDisplay, timeAgo } from "@/lib/utils";
+import { Badge, Button, Card, CardHeader, Confirmation, DiffViewer, Empty, Field, Input, Spinner, SectionLabel, Dot } from "@/components/ui";
+import { gitRemoteDisplay, timeAgo, cn } from "@/lib/utils";
 
 type GitData = {
   repoInfo?: { isRepo: boolean; branch: string; remote: string | null; filesChanged: number; dirty: boolean } | null;
@@ -92,6 +92,7 @@ export function GitPanel({ projectId, refreshKey }: { projectId: string; refresh
 
   return (
     <div className="flex flex-col gap-4">
+      {/* Repository info + branch controls */}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
         <Card className="lg:col-span-2">
           <CardHeader
@@ -100,7 +101,7 @@ export function GitPanel({ projectId, refreshKey }: { projectId: string; refresh
             right={info && <Badge tone={info.dirty ? "amber" : "green"}>{info.dirty ? `${info.filesChanged} changed` : "clean"}</Badge>}
           />
           <div className="p-4">
-            <div className="mb-4 flex flex-wrap items-end gap-3">
+            <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-end">
               <div className="flex-1">
                 <Field label="Create / switch branch">
                   <div className="flex gap-2">
@@ -115,7 +116,7 @@ export function GitPanel({ projectId, refreshKey }: { projectId: string; refresh
                         }
                       }}
                     >
-                      Create & checkout
+                      Create
                     </Button>
                   </div>
                 </Field>
@@ -124,7 +125,7 @@ export function GitPanel({ projectId, refreshKey }: { projectId: string; refresh
                 <Field label="Branches">
                   <div className="flex gap-2">
                     <select
-                      className="h-8 flex-1 rounded-md border border-border-strong bg-bg px-2 text-xs text-fg cursor-pointer"
+                      className="h-8 flex-1 rounded-md border border-border bg-bg-subtle px-2 text-xs text-fg font-mono cursor-pointer"
                       value={data.current ?? ""}
                       onChange={async (e) => {
                         if (!e.target.value) return;
@@ -146,8 +147,9 @@ export function GitPanel({ projectId, refreshKey }: { projectId: string; refresh
               </div>
             </div>
 
+            {/* Commit area */}
             {info?.dirty && (
-              <div className="mb-4 rounded-lg border border-border-strong bg-bg-subtle p-4">
+              <div className="mb-4 rounded-lg border border-border bg-bg-subtle p-4">
                 <div className="mb-2 flex items-center justify-between">
                   <div className="text-[12px] font-medium text-fg">
                     Uncommitted changes <span className="text-fg-dim">({info.filesChanged} files)</span>
@@ -187,17 +189,14 @@ export function GitPanel({ projectId, refreshKey }: { projectId: string; refresh
               </div>
             )}
 
+            {/* Diff file list */}
             <div className="flex items-center justify-between border-b border-border pb-2">
-              <div className="text-[11px] font-medium uppercase tracking-wide text-fg-dim">
+              <SectionLabel>
                 Diff — {diffPairs.length} file{diffPairs.length === 1 ? "" : "s"}
-              </div>
-              <div className="flex gap-4 text-[10px] text-fg-dim">
-                <span>
-                  <span className="text-green">+{diffPairs.reduce((a, f) => a + f.additions, 0)}</span>
-                </span>
-                <span>
-                  <span className="text-red">−{diffPairs.reduce((a, f) => a + f.deletions, 0)}</span>
-                </span>
+              </SectionLabel>
+              <div className="flex gap-4 text-[10px] font-mono">
+                <span className="text-green">+{diffPairs.reduce((a, f) => a + f.additions, 0)}</span>
+                <span className="text-red">−{diffPairs.reduce((a, f) => a + f.deletions, 0)}</span>
               </div>
             </div>
 
@@ -209,12 +208,15 @@ export function GitPanel({ projectId, refreshKey }: { projectId: string; refresh
                   <button
                     key={f.path}
                     onClick={() => setActiveDiff(activeDiff?.path === f.path ? null : f)}
-                    className="cursor-pointer rounded-md px-2 py-1.5 text-left text-[11px] hover:bg-bg-subtle transition-colors"
+                    className={cn(
+                      "cursor-pointer rounded-md px-2.5 py-1.5 text-left text-[11px] transition-colors",
+                      activeDiff?.path === f.path ? "bg-bg-subtle" : "hover:bg-bg-subtle/60"
+                    )}
                   >
                     <div className="flex items-center gap-2">
                       <span className="flex-1 truncate font-mono text-fg-muted">{f.path}</span>
-                      <span className="text-green">+{f.additions}</span>
-                      <span className="text-red">−{f.deletions}</span>
+                      <span className="text-green font-mono">+{f.additions}</span>
+                      <span className="text-red font-mono">−{f.deletions}</span>
                     </div>
                   </button>
                 ))
@@ -222,33 +224,29 @@ export function GitPanel({ projectId, refreshKey }: { projectId: string; refresh
             </div>
 
             {activeDiff && (
-              <div className="mt-2 rounded-lg border border-border-strong bg-bg-subtle">
-                <div className="flex items-center justify-between border-b border-border px-3 py-1.5">
-                  <span className="font-mono text-[11px] text-fg">{activeDiff.path}</span>
-                  <div className="flex items-center gap-1">
-                    <span className="text-green text-[10px]">+{activeDiff.additions}</span>
-                    <span className="text-red text-[10px]">−{activeDiff.deletions}</span>
-                    <CopyButton text={activeDiff.hunks} label="copy" />
-                  </div>
-                </div>
-                <pre className="max-h-96 overflow-auto p-3 font-mono text-[11px] leading-relaxed text-fg-muted">
-                  {activeDiff.hunks}
-                </pre>
+              <div className="mt-3">
+                <DiffViewer
+                  hunks={activeDiff.hunks}
+                  fileName={activeDiff.path}
+                  additions={activeDiff.additions}
+                  deletions={activeDiff.deletions}
+                />
               </div>
             )}
           </div>
         </Card>
 
+        {/* Conflict scanner */}
         <Card>
           <CardHeader
-            title="Merge conflict detection"
-            subtitle="Checks current branch vs target using git merge-tree"
+            title="Conflict Detection"
+            subtitle="Predicts merge conflicts via git merge-tree"
             right={<Badge tone={conflicts.length > 0 ? "red" : "green"}>{conflicts.length > 0 ? `${conflicts.length} conflict${conflicts.length > 1 ? "s" : ""}` : "clean"}</Badge>}
           />
           <div className="p-4">
             <div className="mb-3 flex gap-2">
               <select
-                className="h-8 flex-1 rounded-md border border-border-strong bg-bg px-2 text-xs text-fg cursor-pointer"
+                className="h-8 flex-1 rounded-md border border-border bg-bg-subtle px-2 text-xs text-fg font-mono cursor-pointer"
                 value={conflictTarget}
                 onChange={(e) => setConflictTarget(e.target.value)}
               >
@@ -266,10 +264,8 @@ export function GitPanel({ projectId, refreshKey }: { projectId: string; refresh
             </div>
 
             {conflictScanned && (
-              <div className="mb-3 text-[11px] text-fg-dim">
-                <span className="font-mono">{conflictScanned.current}</span>
-                <span className="mx-1 text-fg-dim">→</span>
-                <span className="font-mono">{conflictScanned.target}</span>
+              <div className="mb-3 text-[11px] text-fg-dim font-mono">
+                {conflictScanned.current} → {conflictScanned.target}
               </div>
             )}
 
@@ -279,7 +275,7 @@ export function GitPanel({ projectId, refreshKey }: { projectId: string; refresh
                 <ul className="flex flex-col gap-1">
                   {conflicts.map((c) => (
                     <li key={c.fileName} className="flex items-center gap-2 font-mono text-[11px] text-red/90">
-                      <span className="size-1.5 rounded-full bg-red" />
+                      <Dot tone="red" />
                       {c.fileName}
                     </li>
                   ))}
@@ -296,8 +292,9 @@ export function GitPanel({ projectId, refreshKey }: { projectId: string; refresh
         </Card>
       </div>
 
+      {/* Commit log */}
       <Card>
-        <CardHeader title="Recent commits" subtitle={`${(data.commits ?? []).length} in view`} />
+        <CardHeader title="Recent Commits" subtitle={`${(data.commits ?? []).length} in view`} />
         <div className="p-2">
           <div className="flex flex-col">
             {(data.commits ?? []).map((c, i) => (
@@ -306,7 +303,7 @@ export function GitPanel({ projectId, refreshKey }: { projectId: string; refresh
                 className="flex items-center gap-3 rounded-md border border-transparent px-2.5 py-1.5 hover:border-border hover:bg-bg-subtle/50 transition-colors"
               >
                 <div className="flex flex-col items-center">
-                  <span className={i === 0 ? "size-2 rounded-full bg-accent" : "size-2 rounded-full bg-fg-dim"} />
+                  <span className={cn("size-2 rounded-full", i === 0 ? "bg-fg" : "bg-fg-dim")} />
                   {i < (data.commits ?? []).length - 1 && <span className="mt-0.5 w-px flex-1 bg-border" />}
                 </div>
                 <span className="font-mono text-[10px] text-fg-dim">{c.shortSha}</span>

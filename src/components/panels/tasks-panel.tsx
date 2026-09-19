@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Badge, Button, Card, CardHeader, Confirmation, Empty, Field, Input, Select, Textarea, type BadgeTone } from "@/components/ui";
+import { Badge, Button, Card, CardHeader, Confirmation, Empty, Field, Input, Select, Textarea, TabBar, Tab, SectionLabel, type BadgeTone } from "@/components/ui";
 import { timeAgo, cn } from "@/lib/utils";
 import { MiniChain } from "@/components/topology";
 import { memberToCard, type AgentCardInfo } from "@/lib/topology";
@@ -123,35 +123,37 @@ export function TasksPanel({ projectId, refreshKey }: { projectId: string; refre
 
   return (
     <div className="flex flex-col gap-4">
-      {/* Stage 5C Phase 8: Project-Level Agent Workflow Visualization */}
+      {/* Workflow chain visualization */}
       {tasks.length > 0 && (
         <Card>
           <CardHeader
-            title="Agent Coordination & Git Workflow Chain"
-            subtitle="Live trace: Agent → Worktree → Commit → Handoff → Next Task → PR"
+            title="Workflow Chain"
+            subtitle="Agent → Worktree → Commit → Handoff → Next Task → PR"
             right={
-              <button
+              <Button
+                variant="ghost"
+                size="xs"
                 onClick={() => setShowWorkflowGraph((v) => !v)}
-                className="rounded border border-border px-2 py-1 text-[11px] font-medium text-fg-muted hover:text-fg transition-colors"
               >
-                {showWorkflowGraph ? "Hide Flow" : "Show Flow"}
-              </button>
+                {showWorkflowGraph ? "Hide" : "Show"}
+              </Button>
             }
           />
           {showWorkflowGraph && (
-            <div className="p-4 border-t border-border bg-bg-subtle/30 overflow-x-auto">
+            <div className="p-4 border-t border-border overflow-x-auto">
               <WorkflowChainVisualization tasks={tasks} handoffs={handoffs} />
             </div>
           )}
         </Card>
       )}
 
+      {/* Auto-dispatch */}
       {autoTasks.length > 0 && (
         <Card>
           <CardHeader
             title="Dispatch via Master"
-            subtitle="Auto-assigned tasks route through the configured master, which picks the subagent."
-            right={<Badge tone="purple">{autoTasks.length}</Badge>}
+            subtitle="Auto-assigned tasks route through the configured master."
+            right={<Badge tone="accent">{autoTasks.length}</Badge>}
           />
           <div className="grid grid-cols-1 gap-3 p-3 md:grid-cols-2">
             {autoTasks.map((t) => (
@@ -163,6 +165,7 @@ export function TasksPanel({ projectId, refreshKey }: { projectId: string; refre
         </Card>
       )}
 
+      {/* Main task list */}
       <Card>
         <CardHeader
           title="Tasks"
@@ -173,21 +176,14 @@ export function TasksPanel({ projectId, refreshKey }: { projectId: string; refre
             </Button>
           }
         />
-        <div className="flex items-center gap-1 border-b border-border px-3 py-2">
-          {(["all", ...STATUSES] as const).map((s) => (
-            <button
-              key={s}
-              onClick={() => setFilter(s)}
-              className={cn(
-                "rounded-md px-2.5 py-1 text-[11px] font-medium transition-colors cursor-pointer",
-                filter === s ? "bg-bg-subtle text-fg border border-border-strong" : "text-fg-muted hover:text-fg"
-              )}
-            >
+        <TabBar>
+          <Tab active={filter === "all"} onClick={() => setFilter("all")}>all</Tab>
+          {STATUSES.map((s) => (
+            <Tab key={s} active={filter === s} onClick={() => setFilter(s)} count={counts(s)}>
               {s.replace("_", " ")}
-              {s !== "all" && <span className="ml-1 text-fg-dim">{counts(s)}</span>}
-            </button>
+            </Tab>
           ))}
-        </div>
+        </TabBar>
 
         {showForm && (
           <div className="border-b border-border p-4">
@@ -216,6 +212,7 @@ export function TasksPanel({ projectId, refreshKey }: { projectId: string; refre
                     <option value="auto">Auto / Master</option>
                     <option value="opencode">OpenCode</option>
                     <option value="codex">Codex</option>
+                    <option value="hermes">Hermes</option>
                   </Select>
                 </Field>
               </div>
@@ -279,22 +276,18 @@ function WorkflowChainVisualization({
         return (
           <div key={t.id} className="flex items-center gap-3 shrink-0">
             {/* Task Node */}
-            <div className="w-56 rounded-xl border border-border bg-bg-elevated p-3 shadow-sm hover:border-accent/40 transition-colors">
+            <div className="w-52 rounded-lg border border-border bg-bg-elevated p-3 hover:border-border-strong transition-colors">
               <div className="flex items-center justify-between gap-1 text-[10px] text-fg-dim">
                 <span className="font-semibold text-fg uppercase">{agentName}</span>
-                <span className={cn(
-                  "px-1.5 py-0.5 rounded font-mono",
-                  t.status === "done" ? "bg-green/10 text-green" : "bg-bg-subtle text-fg-muted"
-                )}>
-                  {t.status}
-                </span>
+                <Badge tone={t.status === "done" ? "green" : t.status === "in_progress" ? "amber" : "dim"}>
+                  {t.status.replace("_", " ")}
+                </Badge>
               </div>
               <div className="mt-1 font-medium text-xs text-fg truncate" title={t.title}>
                 {t.title}
               </div>
 
-              {/* Worktree & Branch */}
-              <div className="mt-2 space-y-1 text-[10px] font-mono text-fg-dim border-t border-border/50 pt-2">
+              <div className="mt-2 space-y-1 text-[10px] font-mono text-fg-dim border-t border-border pt-2">
                 <div className="flex items-center justify-between">
                   <span className="text-fg-muted">Worktree:</span>
                   <span className={cn(
@@ -306,7 +299,7 @@ function WorkflowChainVisualization({
                 {t.worktree_branch && (
                   <div className="flex items-center justify-between">
                     <span className="text-fg-muted">Branch:</span>
-                    <span className="text-cyan truncate max-w-[120px]" title={t.worktree_branch}>
+                    <span className="text-fg truncate max-w-[110px]" title={t.worktree_branch}>
                       @{t.worktree_branch}
                     </span>
                   </div>
@@ -314,7 +307,7 @@ function WorkflowChainVisualization({
                 {t.latest_commit && (
                   <div className="flex items-center justify-between">
                     <span className="text-fg-muted">Commit:</span>
-                    <span className="text-amber font-mono font-semibold">
+                    <span className="text-amber font-semibold">
                       {t.latest_commit.slice(0, 7)}
                     </span>
                   </div>
@@ -323,7 +316,7 @@ function WorkflowChainVisualization({
                   <div className="flex items-center justify-between text-green">
                     <span>PR:</span>
                     {t.pr_url ? (
-                      <a href={t.pr_url} target="_blank" rel="noopener noreferrer" className="underline hover:text-green-light">
+                      <a href={t.pr_url} target="_blank" rel="noopener noreferrer" className="underline">
                         #{t.pr_number} ↗
                       </a>
                     ) : (
@@ -338,17 +331,12 @@ function WorkflowChainVisualization({
             {outHandoff && (
               <div className="flex flex-col items-center justify-center px-1 text-center">
                 <div className="flex items-center gap-1">
-                  <div className="h-0.5 w-6 bg-accent/60" />
-                  <div className={cn(
-                    "rounded-full px-2 py-0.5 text-[9px] font-mono font-semibold uppercase border",
-                    outHandoff.status === "accepted"
-                      ? "border-green/40 bg-green/10 text-green"
-                      : "border-amber/40 bg-amber/10 text-amber"
-                  )}>
-                    Handoff: {outHandoff.status}
-                  </div>
-                  <div className="h-0.5 w-6 bg-accent/60" />
-                  <span className="text-accent text-xs">▶</span>
+                  <div className="h-px w-5 bg-border-strong" />
+                  <Badge tone={outHandoff.status === "accepted" ? "green" : "amber"}>
+                    {outHandoff.status}
+                  </Badge>
+                  <div className="h-px w-5 bg-border-strong" />
+                  <span className="text-fg-dim text-xs">→</span>
                 </div>
                 {outHandoff.commit_sha && (
                   <span className="mt-1 text-[9px] font-mono text-fg-dim">
@@ -359,7 +347,7 @@ function WorkflowChainVisualization({
             )}
 
             {!outHandoff && idx < tasks.length - 1 && (
-              <div className="h-0.5 w-6 bg-border" />
+              <div className="h-px w-5 bg-border" />
             )}
           </div>
         );
@@ -399,16 +387,16 @@ function TaskRow({
       case "blocked": return "amber";
       case "done": return "green";
       case "failed": return "red";
-      case "queued": return "cyan";
+      case "queued": return "amber";
       default: return "dim";
     }
   };
 
   return (
-    <div className="group flex flex-col py-2 px-2.5 hover:bg-bg-subtle/40 rounded-lg transition-colors">
+    <div className="group flex flex-col py-2 px-2.5 hover:bg-bg-subtle/40 rounded-md transition-colors">
       <div className="flex items-start gap-3">
         <div className="flex flex-col gap-1 pt-0.5">
-          <Select value={task.status} onChange={(e) => onStatus(e.target.value)} className="h-6 w-30 text-[10px] px-1.5">
+          <Select value={task.status} onChange={(e) => onStatus(e.target.value)} className="h-6 w-28 text-[10px] px-1.5">
             <option value="todo">todo</option>
             <option value="queued">queued</option>
             <option value="in_progress">in_progress</option>
@@ -431,15 +419,14 @@ function TaskRow({
               {task.status.replace("_", " ")}
             </Badge>
 
-            {/* Stage 5C Workflow Badges */}
             {task.worktree_status && task.worktree_status !== "none" && (
               <Badge tone={task.worktree_status === "ready" ? "green" : "dim"}>
                 wt: {task.worktree_status}
               </Badge>
             )}
             {task.latest_commit && (
-              <Badge tone="purple">
-                git: {task.latest_commit.slice(0, 7)}
+              <Badge tone="dim">
+                {task.latest_commit.slice(0, 7)}
               </Badge>
             )}
             {task.pr_number && (
@@ -449,12 +436,12 @@ function TaskRow({
             )}
             {outgoingHandoff && (
               <Badge tone={outgoingHandoff.status === "accepted" ? "green" : "amber"}>
-                Handoff → {outgoingHandoff.status}
+                → {outgoingHandoff.status}
               </Badge>
             )}
             {incomingHandoff && (
-              <Badge tone={incomingHandoff.status === "accepted" ? "cyan" : "amber"}>
-                Incoming Handoff ({incomingHandoff.status})
+              <Badge tone={incomingHandoff.status === "accepted" ? "green" : "amber"}>
+                ← {incomingHandoff.status}
               </Badge>
             )}
           </div>
@@ -472,16 +459,17 @@ function TaskRow({
               <option value="auto">Auto / Master</option>
               <option value="opencode">OpenCode</option>
               <option value="codex">Codex</option>
+              <option value="hermes">Hermes</option>
             </Select>
 
             {task.session_id && (
-              <span className="font-mono text-cyan">
+              <span className="font-mono text-fg-muted">
                 session {task.session_id.slice(0, 8)}
               </span>
             )}
             {task.worktree_branch && <span className="font-mono text-fg-muted">@{task.worktree_branch}</span>}
             <span>updated {timeAgo(task.updated_at)}</span>
-            <span className="text-accent underline text-[10px]">{isExpanded ? "Collapse ▲" : "Workflow Chain ▼"}</span>
+            <span className="text-fg-muted underline text-[10px]">{isExpanded ? "Collapse ▲" : "Details ▼"}</span>
           </div>
         </div>
 
@@ -489,7 +477,7 @@ function TaskRow({
           {showConfirm ? (
             <Confirmation onConfirm={onConfirmDelete} onCancel={onCancelDelete} />
           ) : (
-            <button onClick={onDelete} className="rounded p-1 text-fg-dim hover:text-red transition-colors cursor-pointer" title="Delete task">
+            <button onClick={onDelete} className="rounded p-1 text-fg-dim hover:text-red transition-colors cursor-pointer" title="Delete task" aria-label="Delete task">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
                 <path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m3 0v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6" />
               </svg>
@@ -498,12 +486,10 @@ function TaskRow({
         </div>
       </div>
 
-      {/* Stage 5C Phase 7: Task Detail Chain */}
+      {/* Expanded detail */}
       {isExpanded && (
         <div className="mt-3 rounded-lg border border-border bg-bg-elevated p-3 text-xs">
-          <div className="font-semibold text-fg-muted uppercase tracking-wider text-[10px] mb-2">
-            Execution & Coordination Chain
-          </div>
+          <SectionLabel className="mb-2">Execution Chain</SectionLabel>
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 font-mono text-[11px]">
             <div className="rounded border border-border p-2 bg-bg-subtle">
               <div className="text-[9px] text-fg-dim uppercase">1. Task</div>
@@ -512,15 +498,15 @@ function TaskRow({
             </div>
 
             <div className="rounded border border-border p-2 bg-bg-subtle">
-              <div className="text-[9px] text-fg-dim uppercase">2. Agent Session</div>
-              <div className="text-cyan">{task.assigned_agent || "unassigned"}</div>
+              <div className="text-[9px] text-fg-dim uppercase">2. Agent</div>
+              <div className="text-fg">{task.assigned_agent || "unassigned"}</div>
               <div className="text-[10px] text-fg-dim truncate">
                 {task.session_id ? `id: ${task.session_id.slice(0, 8)}` : "no active session"}
               </div>
             </div>
 
             <div className="rounded border border-border p-2 bg-bg-subtle">
-              <div className="text-[9px] text-fg-dim uppercase">3. Worktree & Git</div>
+              <div className="text-[9px] text-fg-dim uppercase">3. Git</div>
               <div className="text-fg-muted truncate">{task.worktree_branch || "no branch"}</div>
               <div className="text-[10px] text-fg-dim truncate">
                 {task.latest_commit ? `commit: ${task.latest_commit.slice(0, 7)}` : "no commit yet"}
@@ -542,7 +528,7 @@ function TaskRow({
                     PR #{task.pr_number} ↗
                   </a>
                 ) : (
-                  <span className="text-fg-dim">no PR created</span>
+                  <span className="text-fg-dim">no PR</span>
                 )}
               </div>
             </div>
@@ -550,7 +536,7 @@ function TaskRow({
 
           {task.worktree_path && (
             <div className="mt-2 text-[10px] text-fg-dim font-mono">
-              <span className="text-fg-muted">Worktree Path:</span> {task.worktree_path}
+              <span className="text-fg-muted">Worktree:</span> {task.worktree_path}
             </div>
           )}
         </div>

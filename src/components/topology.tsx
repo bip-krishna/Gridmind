@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Background,
   BackgroundVariant,
@@ -62,7 +62,7 @@ function buildGraph(cards: AgentCardInfo[], compact: boolean) {
         target: s.id,
         type: "smoothstep",
         animated: s.working,
-        style: { stroke: "#3b4252", strokeWidth: 1.5 },
+        style: { stroke: "var(--border-strong)", strokeWidth: 1.5 },
       });
     }
   });
@@ -75,9 +75,9 @@ function TeamNode({ data }: NodeProps<Node<TeamData>>) {
   return (
     <div
       className={cn(
-        "rounded-xl border bg-bg-elevated shadow-lg shadow-black/20 transition-shadow duration-150 hover:shadow-accent/10",
+        "rounded-lg border bg-bg-elevated transition-colors",
         compact ? "w-[206px]" : "w-[236px]",
-        card.working ? "border-accent/50" : "border-border-strong"
+        card.working ? "border-amber/50" : "border-border"
       )}
     >
       <Handle type="target" position={Position.Top} className="!opacity-0" />
@@ -102,6 +102,11 @@ export function TeamGraph({
   onSelect?: (card: AgentCardInfo) => void;
   emptyHint?: string;
 }) {
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
   const built = useMemo(() => buildGraph(cards, compact), [cards, compact]);
   const [nodes, setNodes, onNodesChange] = useNodesState(built.nodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(built.edges);
@@ -117,10 +122,21 @@ export function TeamGraph({
     });
   }, [built, setEdges, setNodes]);
 
+  if (!mounted) {
+    return (
+      <div
+        style={{ height }}
+        className="flex items-center justify-center rounded-lg border border-border bg-bg-elevated text-[11px] text-fg-dim animate-pulse"
+      >
+        Initializing canvas…
+      </div>
+    );
+  }
+
   if (cards.length === 0) {
     return (
       <div
-        className="flex items-center justify-center rounded-xl border border-dashed border-border-strong bg-bg-elevated text-center"
+        className="flex items-center justify-center rounded-lg border border-dashed border-border bg-bg-elevated text-center"
         style={{ height }}
       >
         <div className="px-6">
@@ -132,7 +148,7 @@ export function TeamGraph({
   }
 
   return (
-    <div style={{ height }} className="w-full overflow-hidden rounded-xl border border-border bg-bg">
+    <div style={{ height }} className="w-full overflow-hidden rounded-lg border border-border bg-bg">
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -155,7 +171,7 @@ export function TeamGraph({
         proOptions={{ hideAttribution: true }}
         nodesFocusable
       >
-        <Background variant={BackgroundVariant.Dots} gap={22} size={1} color="#1c212e" />
+        <Background variant={BackgroundVariant.Dots} gap={22} size={1} color="var(--border)" />
       </ReactFlow>
     </div>
   );
@@ -171,40 +187,31 @@ export function AgentCardBody({ card, compact = false }: { card: AgentCardInfo; 
             {card.name}
           </span>
         </div>
-        <Badge tone={card.role === "master" ? "purple" : card.role === "reviewer" ? "cyan" : agentTone(card.agent_type)}>
+        <Badge tone={card.role === "master" ? "dim" : card.role === "reviewer" ? "dim" : agentTone(card.agent_type)}>
           {AGENT_ROLE_LABEL[card.role]}
         </Badge>
       </div>
 
       {!compact && (
-        <div className="mt-2 flex flex-col gap-1 text-[10px] text-fg-dim">
+        <div className="mt-2 flex flex-col gap-1 text-[10px] text-fg-dim font-mono">
           <span className="flex items-center gap-1.5">
-            <span className="w-10 uppercase tracking-wide">Status</span>
+            <span className="w-10 uppercase tracking-wide text-fg-dim/80">Status</span>
             <span className={cn("font-medium", card.working ? "text-amber" : card.connected ? "text-green" : "text-fg-muted")}>
               {card.statusLabel}
             </span>
-            <span className="text-fg-dim/70">·</span>
-            <span className="font-mono normal-case">{card.agent_type}</span>
+            <span className="text-fg-dim/50">·</span>
+            <span className="normal-case">{card.agent_type}</span>
           </span>
           <span className="flex items-center gap-1.5">
-            <span className="w-10 uppercase tracking-wide">Task</span>
-            <span className="truncate text-fg-muted">{card.taskTitle ?? "—"}</span>
+            <span className="w-10 uppercase tracking-wide text-fg-dim/80">Task</span>
+            <span className="truncate text-fg-muted">{card.taskTitle ?? "idle"}</span>
           </span>
           <span className="flex items-center gap-1.5">
-            <span className="w-10 uppercase tracking-wide">Branch</span>
-            <span className="truncate font-mono">{card.branch ?? "—"}</span>
+            <span className="w-10 uppercase tracking-wide text-fg-dim/80">Branch</span>
+            <span className="truncate text-fg-muted">{card.branch ?? "none"}</span>
           </span>
         </div>
       )}
-
-      <div className="mt-2 flex items-center justify-between border-t border-border pt-2">
-        <span className="text-[9px] uppercase tracking-wide text-fg-dim">
-          {card.working ? "● active" : card.connected ? "○ connected" : "○ disconnected"}
-        </span>
-        {card.sessionId ? (
-          <span className="text-[9px] font-medium uppercase tracking-wide text-accent">view session →</span>
-        ) : null}
-      </div>
     </div>
   );
 }
@@ -221,7 +228,7 @@ export function MiniChain({
   return (
     <div className="flex flex-col gap-0.5">
       <div className="flex items-center gap-2">
-        <span className="rounded-md border border-accent/40 bg-accent-soft px-2 py-1 text-[10px] font-medium text-accent">
+        <span className="rounded border border-border bg-bg-subtle px-2 py-0.5 text-[10px] font-mono text-fg">
           {taskTitle.length > 42 ? `${taskTitle.slice(0, 42)}…` : taskTitle}
         </span>
       </div>
@@ -231,10 +238,10 @@ export function MiniChain({
         </svg>
       </div>
       <div className="flex items-center gap-2 pl-3">
-        <span className="rounded-md border border-purple-soft bg-purple-soft px-2 py-1 text-[10px] font-medium text-purple">
+        <span className="rounded border border-border bg-bg-subtle px-2 py-0.5 text-[10px] font-medium text-fg">
           {master ? master.name : "Master"}
         </span>
-        <span className="text-[9px] uppercase tracking-wide text-fg-dim">· {master ? master.agent_type : "none configured"}</span>
+        <span className="text-[9px] uppercase tracking-wide text-fg-dim font-mono">· {master ? master.agent_type : "none configured"}</span>
       </div>
       {subs.length > 0 && (
         <>
@@ -247,7 +254,7 @@ export function MiniChain({
             {subs.map((s) => (
               <span
                 key={s.id}
-                className="rounded-md border border-border-strong bg-bg-subtle px-2 py-1 text-[10px] font-medium text-fg-muted"
+                className="rounded border border-border bg-bg-subtle px-2 py-0.5 text-[10px] font-mono text-fg-muted"
               >
                 {s.name} · {AGENT_ROLE_LABEL[s.role]}
               </span>

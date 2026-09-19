@@ -38,7 +38,7 @@ export interface AgentAdapter {
   onLine(line: string, emit: (m: AgentMessage) => void): void;
 }
 
-export const AGENT_TYPES = ["opencode", "codex"] as const;
+export const AGENT_TYPES = ["opencode", "codex", "hermes"] as const;
 export type AgentType = (typeof AGENT_TYPES)[number];
 
 function resolveBinary(name: string): string | null {
@@ -163,12 +163,46 @@ export class CodexAdapter implements AgentAdapter {
   }
 }
 
+/** Hermes adapter: `hermes chat -q <prompt> --oneshot --yolo`. */
+export class HermesAdapter implements AgentAdapter {
+  readonly type = "hermes";
+  readonly label = "Hermes";
+
+  isAvailable(): boolean {
+    try {
+      execSync("hermes --version", { stdio: "pipe" });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  spawn(options: SpawnOptions): SpawnedAgent {
+    const bin = resolveBinary("hermes")!;
+    const cwd = options.cwd ?? options.repoPath;
+    const args = ["chat", "-q", options.prompt, "--oneshot", "--yolo"];
+    const proc = spawn(bin, args, {
+      cwd,
+      env: { ...process.env, ...options.env },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    return { proc, ready: Promise.resolve() };
+  }
+
+  onLine(line: string, emit: (m: AgentMessage) => void): void {
+    if (line.trim().length === 0) return;
+    emit({ type: "output", step: "output", text: line });
+  }
+}
+
 export function getAdapter(type: string): AgentAdapter {
   switch (type) {
     case "opencode":
       return new OpenCodeAdapter();
     case "codex":
       return new CodexAdapter();
+    case "hermes":
+      return new HermesAdapter();
     default:
       throw new Error(`unknown agent type: ${type}`);
   }

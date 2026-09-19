@@ -1,10 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { cn, extractRepoName } from "@/lib/utils";
 import { useProjectPoll, useSSE } from "@/lib/hooks";
-import { Input, Button, Card, CardHeader, Dot, Empty, Spinner } from "@/components/ui";
+import { Button, Card, CardHeader, Dot, Empty, Input, Spinner, StatusIndicator } from "@/components/ui";
+import { ThemeToggle } from "@/components/theme-provider";
+import { animateTabSwitch, animateListItems } from "@/lib/animations";
 import { AgentsPanel } from "@/components/panels/agents-panel";
 import { TasksPanel } from "@/components/panels/tasks-panel";
 import { GitPanel } from "@/components/panels/git-panel";
@@ -13,12 +15,24 @@ import { GithubPanel } from "@/components/panels/github-panel";
 import { ContextPanel } from "@/components/panels/context-panel";
 import { AgentSetupPanel } from "@/components/panels/agentsetup-panel";
 import { HandoffsPanel } from "@/components/panels/handoffs-panel";
-import { TeamGraph } from "@/components/topology";
+import dynamic from "next/dynamic";
 import { composeTopologyCards, type AgentCardInfo } from "@/lib/topology";
 
-type Tab = "overview" | "agents" | "tasks" | "handoffs" | "git" | "timeline" | "github" | "context" | "agentsetup";
+const TeamGraph = dynamic(
+  () => import("@/components/topology").then((m) => m.TeamGraph),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex h-[220px] w-full items-center justify-center rounded-lg border border-border bg-bg-elevated text-[11px] text-fg-dim animate-pulse">
+        Initializing canvas…
+      </div>
+    ),
+  }
+);
 
-const TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
+type NavTab = "overview" | "agents" | "tasks" | "handoffs" | "git" | "timeline" | "github" | "context" | "agentsetup";
+
+const NAV_ITEMS: { id: NavTab; label: string; icon: React.ReactNode }[] = [
   {
     id: "overview",
     label: "Overview",
@@ -46,9 +60,9 @@ const TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
     label: "Agent Setup",
     icon: (
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <rect x="3" y="3" width="7" height="7" rx="1.5" />
-        <rect x="14" y="3" width="7" height="7" rx="1.5" />
-        <rect x="3" y="14" width="7" height="7" rx="1.5" />
+        <rect x="3" y="3" width="7" height="7" rx="1" />
+        <rect x="14" y="3" width="7" height="7" rx="1" />
+        <rect x="3" y="14" width="7" height="7" rx="1" />
         <path d="M17 14v5M14.5 16.5h5" />
       </svg>
     ),
@@ -129,10 +143,24 @@ export function ControlPlane({
   repoPath: string;
   githubRepo: string | null;
 }) {
-  const [tab, setTab] = useState<Tab>("overview");
+  const [tab, setTab] = useState<NavTab>("overview");
   const [focusSessionId, setFocusSessionId] = useState<string | null>(null);
   const { refreshKey, bump, connected } = useProjectPoll(projectId);
   const [poked, setPoked] = useState(false);
+  const [mobileNav, setMobileNav] = useState(false);
+
+  const contentRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (contentRef.current) {
+      animateTabSwitch(contentRef.current);
+    }
+  }, [tab]);
+
+  // Close mobile nav on tab change
+  useEffect(() => {
+    setMobileNav(false);
+  }, [tab]);
 
   function openSession(sessionId: string) {
     setFocusSessionId(sessionId);
@@ -150,90 +178,126 @@ export function ControlPlane({
   }
 
   return (
-    <div className="flex min-h-screen">
-      <aside className="fixed inset-y-0 left-0 z-30 flex w-14 flex-col border-r border-border bg-bg-elevated md:w-52">
-        <div className="mb-4 flex items-center gap-2.5 border-b border-border px-3 py-3.5 md:px-4">
-          <div className="flex size-8 shrink-0 items-center justify-center rounded-lg border border-accent/40 bg-accent-soft">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#7c8cf8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <rect x="3" y="3" width="7" height="7" rx="1.5" />
-              <rect x="14" y="3" width="7" height="7" rx="1.5" />
-              <rect x="3" y="14" width="7" height="7" rx="1.5" />
-              <rect x="14" y="14" width="7" height="7" rx="1.5" />
+    <div className="flex min-h-screen bg-bg text-fg">
+      {/* Mobile nav overlay */}
+      {mobileNav && (
+        <div
+          className="sidebar-overlay lg:hidden"
+          onClick={() => setMobileNav(false)}
+          aria-hidden="true"
+        />
+      )}
+
+      {/* Sidebar */}
+      <aside
+        className={cn(
+          "fixed inset-y-0 left-0 z-30 flex w-56 flex-col border-r border-border bg-bg-elevated transition-transform duration-150",
+          mobileNav ? "translate-x-0" : "-translate-x-full lg:translate-x-0"
+        )}
+      >
+        <div className="flex items-center gap-2.5 border-b border-border px-4 py-3">
+          <div className="flex size-7 shrink-0 items-center justify-center rounded-md border border-border bg-bg-subtle text-fg">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="3" y="3" width="7" height="7" rx="1" />
+              <rect x="14" y="3" width="7" height="7" rx="1" />
+              <rect x="3" y="14" width="7" height="7" rx="1" />
+              <rect x="14" y="14" width="7" height="7" rx="1" />
             </svg>
           </div>
-          <div className="hidden min-w-0 md:block">
-            <div className="truncate text-[13px] font-semibold text-fg">{projectName}</div>
-            <div className="truncate text-[10px] text-fg-dim">{extractRepoName(repoPath)}</div>
+          <div className="min-w-0">
+            <div className="truncate text-[12px] font-semibold text-fg tracking-tight">{projectName}</div>
+            <div className="truncate text-[10px] font-mono text-fg-dim">{extractRepoName(repoPath)}</div>
           </div>
         </div>
 
-        <nav className="flex flex-1 flex-col gap-0.5 px-2 md:px-3">
-          {TABS.map((t) => (
+        <nav className="flex flex-1 flex-col gap-0.5 px-2.5 py-2" aria-label="Main navigation">
+          {NAV_ITEMS.map((t) => (
             <button
               key={t.id}
               onClick={() => setTab(t.id)}
               className={cn(
-                "flex items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-[12px] font-medium transition-colors duration-100 cursor-pointer",
+                "flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left text-[12px] transition-colors duration-100 cursor-pointer",
                 tab === t.id
-                  ? "bg-bg-subtle text-fg border border-border-strong"
-                  : "text-fg-muted hover:text-fg hover:bg-bg-subtle/60 border border-transparent",
-                tab !== t.id && "md:px-3"
+                  ? "bg-bg-subtle text-fg font-medium border border-border-strong"
+                  : "text-fg-muted hover:text-fg hover:bg-bg-subtle/50 border border-transparent"
               )}
+              aria-current={tab === t.id ? "page" : undefined}
             >
               <span className="shrink-0 text-fg-dim">{t.icon}</span>
-              <span className="hidden md:inline">{t.label}</span>
+              <span>{t.label}</span>
             </button>
           ))}
         </nav>
 
-        <div className="border-t border-border px-3 py-3 md:px-4">
-          <Link href="/" className="flex items-center gap-2 text-[11px] text-fg-dim hover:text-fg transition-colors">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M9 14l-4-4 4-4M5 10h11a4 4 0 010 8h-1" />
+        <div className="flex items-center justify-between border-t border-border px-3.5 py-2.5">
+          <Link href="/" className="flex items-center gap-1.5 text-[11px] text-fg-dim hover:text-fg transition-colors">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M19 12H5M12 19l-7-7 7-7" />
             </svg>
-            <span className="hidden md:inline">All projects</span>
+            <span>Projects</span>
           </Link>
+          <ThemeToggle />
         </div>
       </aside>
 
-      <div className="ml-14 flex-1 md:ml-52">
-        <div className="border-b border-border bg-bg-elevated">
-          <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-2.5 md:px-6">
-            <div className="flex items-center gap-2 text-[11px] text-fg-dim">
-              <span className="font-mono">{repoPath}</span>
-              {githubRepo && <span className="font-mono">· gh: {githubRepo}</span>}
-            </div>
-            <div className="flex items-center gap-3">
-              <span className="hidden items-center gap-1.5 text-[10px] uppercase tracking-wide text-fg-dim sm:flex">
-                <Dot tone={connected ? "green" : "red"} pulse={connected} />
-                {connected ? "live" : "offline"}
-              </span>
+      {/* Main Content */}
+      <div className="flex-1 lg:ml-56">
+        {/* Header */}
+        <header className="sticky top-0 z-20 border-b border-border bg-bg/95 backdrop-blur-none">
+          <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-2 md:px-6">
+            <div className="flex items-center gap-2.5">
+              {/* Mobile hamburger */}
               <button
+                onClick={() => setMobileNav(true)}
+                className="flex lg:hidden size-7 items-center justify-center rounded-md border border-border text-fg-muted hover:text-fg transition-colors cursor-pointer"
+                aria-label="Open navigation"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                  <path d="M3 12h18M3 6h18M3 18h18" />
+                </svg>
+              </button>
+              <div className="flex items-center gap-2 text-[11px]">
+                <span className="font-semibold text-fg">{projectName}</span>
+                <span className="text-fg-dim">/</span>
+                <span className="capitalize text-fg-muted">{tab.replace("agentsetup", "agent setup")}</span>
+                {githubRepo && <span className="font-mono text-fg-dim hidden md:inline">· {githubRepo}</span>}
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <StatusIndicator
+                status={connected ? "online" : "offline"}
+                label={connected ? "LIVE" : "OFFLINE"}
+                pulse={connected}
+              />
+              <Button
+                variant="outline"
+                size="xs"
                 onClick={poke}
                 disabled={!connected}
                 title="Publish a test event to the live SSE stream"
-                className="rounded border border-border-strong bg-bg px-2 py-1 text-[10px] font-medium text-fg-muted hover:text-fg transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-default"
               >
-                {poked ? "Poked ✓" : "Poke"}
-              </button>
-              <button
+                {poked ? "Poked" : "Poke"}
+              </Button>
+              <Button
+                variant="outline"
+                size="xs"
                 onClick={bump}
-                className="rounded border border-border-strong bg-bg px-2 py-1 text-[10px] font-medium text-fg-muted hover:text-fg transition-colors cursor-pointer"
+                title="Sync project state"
               >
                 Sync
-              </button>
+              </Button>
             </div>
           </div>
-        </div>
+        </header>
 
-        <main className="mx-auto max-w-7xl px-4 py-5 md:px-6">
+        <main ref={contentRef} className="mx-auto max-w-7xl px-4 py-5 md:px-6">
           {tab === "overview" && (
-            <div className="flex flex-col gap-5">
+            <div className="flex flex-col gap-4">
               <OverviewHeader projectId={projectId} refreshKey={refreshKey} />
               <OverviewTeam projectId={projectId} refreshKey={refreshKey} onOpenSession={openSession} onOpenSetup={() => setTab("agentsetup")} />
-              <div className="grid grid-cols-1 gap-5 xl:grid-cols-5">
+              <div className="grid grid-cols-1 gap-4 xl:grid-cols-5">
                 <div className="xl:col-span-3">
-                  <ActivityFeedMini projectId={projectId} refreshKey={refreshKey} />
+                  <ActivityFeed projectId={projectId} refreshKey={refreshKey} />
                 </div>
                 <div className="xl:col-span-2">
                   <AgentsPanel projectId={projectId} refreshKey={refreshKey} compact onOpenFull={() => setTab("agents")} />
@@ -259,6 +323,8 @@ export function ControlPlane({
     </div>
   );
 }
+
+/* ────────── Overview: Header Stats ────────── */
 
 function OverviewHeader({
   projectId,
@@ -292,40 +358,53 @@ function OverviewHeader({
   const branch = data.git?.info?.branch;
   const taskList = tasks.tasks ?? [];
   const doneTasks = taskList.filter((t) => t.status === "done").length;
+  const inProgress = taskList.filter((t) => t.status === "in_progress").length;
+  const blocked = taskList.filter((t) => t.status === "blocked").length;
   const sessionsList = sessions.sessions ?? [];
   const running = sessionsList.filter((s) => s.status === "running").length;
 
   return (
-    <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-      <StatCard label="Git branch" value={branch || "—"} mono />
+    <div className="grid grid-cols-2 gap-3 md:grid-cols-4 lg:grid-cols-5">
+      <StatCard label="Branch" value={branch || "—"} mono />
       <StatCard
-        label="Working tree"
+        label="Working Tree"
         value={dirty ? "dirty" : "clean"}
         tone={dirty ? "amber" : "green"}
       />
-      <StatCard label="Tasks done" value={`${doneTasks}/${taskList.length}`} />
-      <StatCard label="Agent sessions" value={running > 0 ? `${running} running` : "idle"} tone={running > 0 ? "accent" : "dim"} />
+      <StatCard label="Tasks" value={`${doneTasks}/${taskList.length} done`} mono />
+      <StatCard
+        label="Active"
+        value={inProgress > 0 ? `${inProgress} in progress` : blocked > 0 ? `${blocked} blocked` : "idle"}
+        tone={inProgress > 0 ? "amber" : "dim"}
+      />
+      <StatCard
+        label="Agents"
+        value={running > 0 ? `${running} running` : "idle"}
+        tone={running > 0 ? "accent" : "dim"}
+        className="hidden lg:block"
+      />
     </div>
   );
 }
 
-function StatCard({ label, value, mono, tone }: { label: string; value: string; mono?: boolean; tone?: "green" | "amber" | "accent" | "dim" }) {
+function StatCard({ label, value, mono, tone, className }: { label: string; value: string; mono?: boolean; tone?: "green" | "amber" | "accent" | "dim"; className?: string }) {
   const toneClass =
-    tone === "green" ? "text-green" : tone === "amber" ? "text-amber" : tone === "accent" ? "text-accent" : "text-fg";
+    tone === "green" ? "text-green" : tone === "amber" ? "text-amber" : tone === "accent" ? "text-fg" : "text-fg";
   return (
-    <div className="rounded-xl border border-border bg-bg-elevated px-4 py-3">
-      <div className="text-[10px] uppercase tracking-wider text-fg-dim">{label}</div>
-      <div className={cn("mt-1 text-lg font-semibold", mono && "font-mono text-base", toneClass)}>{value}</div>
+    <div className={cn("rounded-lg border border-border bg-bg-elevated px-3.5 py-2.5", className)}>
+      <div className="text-[10px] uppercase tracking-wider text-fg-dim font-medium">{label}</div>
+      <div className={cn("mt-1 text-base font-semibold", mono && "font-mono tabular-nums", toneClass)}>{value}</div>
     </div>
   );
 }
 
-function ActivityFeedMini({ projectId, refreshKey }: { projectId: string; refreshKey: number }) {
-  return <ActivityFeed projectId={projectId} refreshKey={refreshKey} />;
-}
+/* ────────── Overview: Activity Feed ────────── */
 
 function ActivityFeed({ projectId, refreshKey }: { projectId: string; refreshKey: number }) {
   const [events, setEvents] = useState<Array<{ id: number; type: string; payload: Record<string, unknown>; ts: number }>>([]);
+  const [filterType, setFilterType] = useState<string>("all");
+  const feedRef = useRef<HTMLDivElement>(null);
+
   const { connected } = useSSE(projectId, (e) => {
     setEvents((prev) => (prev.some((p) => p.id === e.id) ? prev : [...prev, e].slice(-80)));
   });
@@ -343,22 +422,53 @@ function ActivityFeed({ projectId, refreshKey }: { projectId: string; refreshKey
     };
   }, [projectId, refreshKey]);
 
+  useEffect(() => {
+    if (feedRef.current) {
+      animateListItems(feedRef.current, "> div:last-child");
+    }
+  }, [events.length]);
+
   const all = [...events].sort((a, b) => a.ts - b.ts).slice(-60);
+  const filtered = filterType === "all" ? all : all.filter((e) => e.type.startsWith(filterType));
+
+  const filterOptions = [
+    { id: "all", label: "All" },
+    { id: "agent", label: "Agent" },
+    { id: "task", label: "Task" },
+    { id: "git", label: "Git" },
+    { id: "handoff", label: "Handoff" },
+    { id: "context", label: "Context" },
+  ];
 
   return (
-    <Card className="h-[420px] overflow-hidden">
-      <CardHeader
-        title="Activity"
-        subtitle={connected ? "live stream" : "offline"}
-        right={<Dot tone={connected ? "green" : "red"} pulse={connected} />}
-      />
-      <div className="h-[calc(420px-49px)] overflow-y-auto p-2">
-        {all.length === 0 ? (
-          <Empty title="No activity yet" hint="Kick off an agent or make a change to the repo." />
+    <Card className="h-[380px] overflow-hidden">
+      <div className="flex items-center justify-between border-b border-border px-3.5 py-2">
+        <div className="flex items-center gap-2">
+          <h3 className="text-[13px] font-medium text-fg tracking-tight">Activity</h3>
+          <StatusIndicator status={connected ? "online" : "offline"} pulse={connected} />
+        </div>
+        <div className="flex items-center gap-0.5">
+          {filterOptions.map((f) => (
+            <button
+              key={f.id}
+              onClick={() => setFilterType(f.id)}
+              className={cn(
+                "rounded px-2 py-0.5 text-[10px] font-medium transition-colors cursor-pointer",
+                filterType === f.id ? "bg-bg-subtle text-fg" : "text-fg-dim hover:text-fg-muted"
+              )}
+            >
+              {f.label}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div ref={feedRef} className="h-[calc(380px-40px)] overflow-y-auto p-2">
+        {filtered.length === 0 ? (
+          <Empty title="No activity recorded" hint="Kick off an agent or commit changes to see live workflow events." />
         ) : (
           <div className="flex flex-col">
-            {all.map((e, i) => (
-              <ActivityRow key={e.id || i} e={e} last={i === all.length - 1} />
+            {filtered.map((e, i) => (
+              <ActivityRow key={e.id || i} e={e} last={i === filtered.length - 1} />
             ))}
           </div>
         )}
@@ -370,15 +480,15 @@ function ActivityFeed({ projectId, refreshKey }: { projectId: string; refreshKey
 function ActivityRow({ e, last }: { e: { type: string; payload: Record<string, unknown>; ts: number }; last: boolean }) {
   const meta = eventMeta(e.type, e.payload);
   return (
-    <div className="flex gap-2 px-1.5 py-1 text-[11px] leading-relaxed">
-      <div className="flex flex-col items-center pt-0.5">
-        <span className={cn("mt-1 size-1.5 rounded-full", meta.dot)} />
-        {!last && <span className="mt-0.5 w-px flex-1 bg-border" />}
+    <div className="flex gap-2.5 px-2 py-1 text-[11px] leading-relaxed">
+      <div className="flex flex-col items-center pt-1">
+        <span className={cn("size-1.5 rounded-full shrink-0", meta.dot)} />
+        {!last && <span className="mt-1 w-px flex-1 bg-border" />}
       </div>
-      <div className="min-w-0 pb-1">
-        <span className="text-fg-muted font-semibold uppercase tracking-wide text-[9px]">{meta.label}</span>
-        {meta.detail ? <span className="ml-1.5 text-fg">{meta.detail}</span> : null}
-        {meta.sub && <div className="text-fg-dim text-[10px]">{meta.sub}</div>}
+      <div className="min-w-0 pb-1 flex-1">
+        <span className="font-mono text-fg-dim uppercase tracking-wider text-[9px]">{meta.label}</span>
+        {meta.detail ? <span className="ml-2 text-fg font-medium">{meta.detail}</span> : null}
+        {meta.sub && <div className="text-fg-dim font-mono text-[10px] mt-0.5">{meta.sub}</div>}
       </div>
     </div>
   );
@@ -391,7 +501,7 @@ function eventMeta(type: string, payload: Record<string, unknown>): { label: str
         label: "agent started",
         detail: String(payload.agentType ?? ""),
         sub: String(payload.title ?? ""),
-        dot: "bg-accent",
+        dot: "bg-fg",
       };
     case "agent:finished":
       return {
@@ -409,7 +519,7 @@ function eventMeta(type: string, payload: Record<string, unknown>): { label: str
         label: `${String(payload.role ?? "agent")} · ${step}`,
         detail: msg?.type === "status" ? String(msg.text ?? "") : undefined,
         sub: msg?.type === "output" ? String(msg.text ?? "").slice(0, 220) : undefined,
-        dot: msg?.type === "status" ? "bg-amber" : "bg-cyan",
+        dot: msg?.type === "status" ? "bg-amber" : "bg-fg-dim",
       };
     }
     case "git:commit":
@@ -420,13 +530,13 @@ function eventMeta(type: string, payload: Record<string, unknown>): { label: str
         dot: "bg-green",
       };
     case "git:branch-created":
-      return { label: "branch created", detail: String(payload.branch ?? ""), dot: "bg-cyan" };
+      return { label: "branch created", detail: String(payload.branch ?? ""), dot: "bg-fg-dim" };
     case "git:branch-checkout":
-      return { label: "branch checkout", detail: String(payload.branch ?? ""), dot: "bg-cyan" };
+      return { label: "branch checkout", detail: String(payload.branch ?? ""), dot: "bg-fg-dim" };
     case "task:created":
-      return { label: "task created", detail: String(payload.title ?? ""), dot: "bg-accent" };
+      return { label: "task created", detail: String(payload.title ?? ""), dot: "bg-fg" };
     case "task:updated":
-      return { label: "task updated", detail: String(payload.status ?? ""), dot: "bg-purple" };
+      return { label: "task updated", detail: String(payload.status ?? ""), dot: "bg-fg-dim" };
     case "task:deleted":
       return { label: "task deleted", dot: "bg-red" };
     case "handoff:created":
@@ -442,9 +552,9 @@ function eventMeta(type: string, payload: Record<string, unknown>): { label: str
         dot: "bg-green",
       };
     case "context:set":
-      return { label: "context set", detail: String(payload.key ?? ""), dot: "bg-green" };
+      return { label: "context set", detail: String(payload.key ?? ""), dot: "bg-fg-dim" };
     case "decision:created":
-      return { label: "decision", detail: String(payload.title ?? ""), dot: "bg-purple" };
+      return { label: "decision", detail: String(payload.title ?? ""), dot: "bg-fg" };
     case "issue:imported":
       return { label: "issue imported", detail: `#${String(payload.issueNumber ?? "")}`, dot: "bg-amber" };
     case "github:pr_created":
@@ -456,7 +566,7 @@ function eventMeta(type: string, payload: Record<string, unknown>): { label: str
         dot: "bg-green",
       };
     case "agentsetup:master":
-      return { label: "master set", detail: String(payload.agentType ?? ""), sub: String(payload.name ?? ""), dot: "bg-purple" };
+      return { label: "master set", detail: String(payload.agentType ?? ""), sub: String(payload.name ?? ""), dot: "bg-fg" };
     case "agentsetup:change": {
       if (payload.removed) {
         return {
@@ -469,15 +579,17 @@ function eventMeta(type: string, payload: Record<string, unknown>): { label: str
         label: "agent updated",
         detail: `${String(payload.role ?? "")} · ${String(payload.agentType ?? "")}`,
         sub: String(payload.name ?? ""),
-        dot: "bg-purple",
+        dot: "bg-fg-dim",
       };
     }
     case "agent:heartbeat":
-      return { label: "…", dot: "bg-dim" };
+      return { label: "…", dot: "bg-fg-dim" };
     default:
       return { label: type, dot: "bg-fg-dim" };
   }
 }
+
+/* ────────── Overview: Team Topology ────────── */
 
 function OverviewTeam({
   projectId,
@@ -538,24 +650,21 @@ function OverviewTeam({
   return (
     <Card>
       <CardHeader
-        title="Team topology"
-        subtitle="Click an agent to open its latest session"
+        title="Agent Team Topology"
+        subtitle="Active multi-agent orchestration architecture"
         right={
-          <button
-            onClick={onOpenSetup}
-            className="rounded border border-border-strong bg-bg px-2 py-1 text-[10px] font-medium text-fg-muted transition-colors hover:text-fg cursor-pointer"
-          >
+          <Button variant="outline" size="xs" onClick={onOpenSetup}>
             Configure team
-          </button>
+          </Button>
         }
       />
       {cards.length === 0 ? (
         <div className="flex flex-col items-center gap-2 px-6 py-10 text-center">
-          <div className="text-[13px] font-medium text-fg-muted">No team configured</div>
+          <div className="text-[13px] font-medium text-fg">No team configured</div>
           <p className="max-w-sm text-[11px] leading-relaxed text-fg-dim">
-            Configure a master agent and subagents to visualize and run orchestration.
+            Configure a master agent and subagents to enable automatic dispatch and coordination.
           </p>
-          <Button variant="outline" onClick={onOpenSetup}>
+          <Button variant="outline" size="sm" onClick={onOpenSetup} className="mt-2">
             Configure Master
           </Button>
         </div>
@@ -568,21 +677,22 @@ function OverviewTeam({
             onSelect={(c) => c.sessionId && onOpenSession(c.sessionId)}
             emptyHint="Configure a master agent to enable orchestration."
           />
-          <div className="mt-2 flex flex-wrap items-center justify-between gap-2 px-1">
-            <div className="flex flex-wrap items-center gap-2">
+          <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2 px-1 border-t border-border pt-2">
+            <div className="flex flex-wrap items-center gap-1.5">
               {cards.map((c) => (
                 <button
                   key={c.id}
                   onClick={() => c.sessionId && onOpenSession(c.sessionId)}
-                  className="flex items-center gap-1.5 rounded-full border border-border-strong bg-bg px-2 py-0.5 text-[10px] text-fg-muted transition-colors hover:border-accent/50 hover:text-fg cursor-pointer"
+                  className="flex items-center gap-1.5 rounded border border-border bg-bg-subtle px-2 py-0.5 text-[10px] font-mono text-fg-muted hover:text-fg hover:border-border-strong transition-colors cursor-pointer"
                   title={`${c.name} — ${c.statusLabel}`}
                 >
-                  <span className={cn("size-1.5 rounded-full", c.working ? "bg-amber" : c.connected ? "bg-green" : "bg-fg-dim")} />
-                  {c.name} · {c.role.toUpperCase()}
+                  <span className={cn("size-1.5 rounded-full shrink-0", c.working ? "bg-amber" : c.connected ? "bg-green" : "bg-fg-dim")} />
+                  <span>{c.name}</span>
+                  <span className="text-fg-dim font-normal uppercase">({c.role})</span>
                 </button>
               ))}
             </div>
-            <span className="text-[10px] text-fg-dim">
+            <span className="text-[10px] font-mono text-fg-dim">
               {cards.filter((c) => c.working).length} working · {cards.filter((c) => !c.connected).length} offline
             </span>
           </div>
@@ -591,6 +701,8 @@ function OverviewTeam({
     </Card>
   );
 }
+
+/* ────────── Overview: Bottom Panels ────────── */
 
 function OverviewPanels({
   projectId,
@@ -602,27 +714,24 @@ function OverviewPanels({
   onOpenSetup: () => void;
 }) {
   return (
-    <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
-      <div className="rounded-xl border border-border bg-bg-elevated">
-        <div className="flex items-center justify-between px-4 py-3">
-          <div>
-            <h3 className="text-[13px] font-semibold">Master orchestrator</h3>
-            <p className="text-[11px] text-fg-dim">Coordinate work with your configured master agent.</p>
-          </div>
-          <button
-            onClick={onOpenSetup}
-            className="rounded border border-border-strong bg-bg px-2 py-1 text-[10px] font-medium text-fg-muted transition-colors hover:text-fg cursor-pointer"
-          >
-            Agent Setup
-          </button>
-        </div>
-        <div className="px-4 pb-4">
+    <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+      <Card>
+        <CardHeader
+          title="Master Orchestrator"
+          subtitle="Dispatch directives to your configured master agent"
+          right={
+            <Button variant="outline" size="xs" onClick={onOpenSetup}>
+              Agent Setup
+            </Button>
+          }
+        />
+        <div className="p-3.5">
           <MasterLaunchForm projectId={projectId} refreshKey={refreshKey} onOpenSetup={onOpenSetup} />
         </div>
-      </div>
-      <div className="rounded-xl border border-border bg-bg-elevated">
+      </Card>
+      <Card>
         <TaskSummary projectId={projectId} refreshKey={refreshKey} />
-      </div>
+      </Card>
     </div>
   );
 }
@@ -670,20 +779,20 @@ function MasterLaunchForm({
   }
 
   return (
-    <div className="flex flex-col gap-2">
+    <div className="flex flex-col gap-2.5">
       {!masterName && (
-        <div className="flex items-center justify-between gap-2 rounded-md border border-amber/25 bg-amber-soft px-3 py-2">
-          <span className="text-[11px] text-amber">⚠ No Master Agent configured.</span>
-          <button onClick={onOpenSetup} className="text-[11px] font-medium text-amber underline cursor-pointer">
-            Configure Master
+        <div className="flex items-center justify-between gap-2 rounded border border-amber/25 bg-amber-soft px-3 py-2 text-[11px] text-amber">
+          <span>No Master Agent configured.</span>
+          <button onClick={onOpenSetup} className="font-semibold underline cursor-pointer">
+            Configure
           </button>
         </div>
       )}
       {masterName && (
-        <div className="flex items-center gap-2 rounded-md border border-border-strong bg-bg-subtle px-3 py-1.5 text-[11px] text-fg-muted">
-          <span className="uppercase tracking-wide text-[9px] text-fg-dim">master</span>
-          <span className="font-medium text-fg">{masterName}</span>
-          <span className="font-mono normal-case text-[10px]">{masterType}</span>
+        <div className="flex items-center gap-2 rounded border border-border bg-bg-subtle px-3 py-1.5 text-[11px] font-mono text-fg-muted">
+          <span className="text-[10px] text-fg-dim uppercase">master</span>
+          <span className="font-semibold text-fg">{masterName}</span>
+          <span className="text-fg-dim">({masterType})</span>
         </div>
       )}
       <Input value={directive} onChange={(e) => setDirective(e.target.value)} placeholder="Directive for the master agent" />
@@ -715,19 +824,19 @@ function TaskSummary({ projectId, refreshKey }: { projectId: string; refreshKey:
 
   return (
     <div>
-      <div className="px-4 py-3">
-        <h3 className="text-[13px] font-semibold">Task board</h3>
-        <p className="text-[11px] text-fg-dim">{tasks.length} tasks across 4 states</p>
-      </div>
-      <div className="grid grid-cols-4 gap-px border-t border-border">
+      <CardHeader
+        title="Task Distribution"
+        subtitle={`${tasks.length} tasks recorded`}
+      />
+      <div className="grid grid-cols-4 gap-px bg-border">
         {(["todo", "in_progress", "blocked", "done"] as const).map((s) => (
-          <div key={s} className="bg-bg-elevated px-3 py-2.5">
-            <div className="font-mono text-base font-semibold text-fg">{counts[s]}</div>
-            <div className="text-[10px] uppercase tracking-wide text-fg-dim">{s.replace("_", " ")}</div>
+          <div key={s} className="bg-bg-elevated px-3 py-2">
+            <div className="font-mono text-base font-semibold text-fg tabular-nums">{counts[s]}</div>
+            <div className="text-[10px] uppercase font-mono tracking-wider text-fg-dim">{s.replace("_", " ")}</div>
           </div>
         ))}
       </div>
-      <div className="border-t border-border p-2">
+      <div className="p-2 divide-y divide-border/40">
         {tasks.slice(0, 4).map((t) => (
           <div key={t.id} className="flex items-center gap-2 px-2 py-1 text-[11px]">
             <Dot tone={t.status === "done" ? "green" : t.status === "in_progress" ? "amber" : "dim"} />

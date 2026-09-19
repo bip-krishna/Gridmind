@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Badge, Button, Card, CardHeader, Confirmation, CopyButton, Empty, Field, Input, Textarea } from "@/components/ui";
+import { Badge, Button, Card, CardHeader, Confirmation, CopyButton, Empty, Field, Input, Textarea, TabBar, Tab } from "@/components/ui";
 import { fmtDate } from "@/lib/utils";
 
 type ContextEntry = { key: string; value: string };
@@ -77,10 +77,11 @@ export function ContextPanel({ projectId, refreshKey }: { projectId: string; ref
 
   return (
     <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+      {/* Project context */}
       <Card>
         <CardHeader
-          title="Project context"
-          subtitle="Scoped to this project only — never leaks across projects"
+          title="Project Context"
+          subtitle="Scoped to this project — never leaks across projects"
           right={
             entries.length > 0 ? (
               <CopyButton text={brief} label="copy brief" />
@@ -106,8 +107,8 @@ export function ContextPanel({ projectId, refreshKey }: { projectId: string; ref
           ) : (
             <div className="flex flex-col">
               {entries.map((e) => (
-                <div key={e.key} className="group flex items-start gap-3 rounded-lg border border-transparent px-3 py-2 hover:border-border hover:bg-bg-subtle/50 transition-colors">
-                  <span className="w-40 shrink-0 truncate font-mono text-[11px] text-accent">{e.key}</span>
+                <div key={e.key} className="group flex items-start gap-3 rounded-md border border-transparent px-3 py-2 hover:border-border hover:bg-bg-subtle/50 transition-colors">
+                  <span className="w-36 shrink-0 truncate font-mono text-[11px] text-fg font-medium">{e.key}</span>
                   <span className="flex-1 text-[11px] text-fg-muted">{e.value}</span>
                   {confirmDel === e.key ? (
                     <Confirmation onConfirm={() => removeContext(e.key)} onCancel={() => setConfirmDel(null)} />
@@ -115,6 +116,7 @@ export function ContextPanel({ projectId, refreshKey }: { projectId: string; ref
                     <button
                       onClick={() => setConfirmDel(e.key)}
                       className="hidden rounded p-1 text-fg-dim hover:text-red cursor-pointer group-hover:block"
+                      aria-label={`Delete context key ${e.key}`}
                     >
                       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
                         <path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m3 0v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6" />
@@ -128,11 +130,12 @@ export function ContextPanel({ projectId, refreshKey }: { projectId: string; ref
         </div>
       </Card>
 
+      {/* Decisions */}
       <Card>
         <CardHeader
           title="Decisions"
           subtitle="Recorded decisions that the team should follow"
-          right={<Badge tone="purple">{decisions.length} recorded</Badge>}
+          right={<Badge tone="dim">{decisions.length} recorded</Badge>}
         />
         <div className="border-b border-border p-4">
           <div className="flex flex-col gap-3">
@@ -149,26 +152,20 @@ export function ContextPanel({ projectId, refreshKey }: { projectId: string; ref
             </div>
           </div>
         </div>
-        <div className="flex items-center gap-1 border-b border-border px-3 py-2">
+        <TabBar>
           {(["all", "open", "superseded", "accepted"] as const).map((s) => (
-            <button
-              key={s}
-              onClick={() => setStatusFilter(s)}
-              className={`rounded-md px-2 py-1 text-[11px] font-medium transition-colors cursor-pointer ${
-                statusFilter === s ? "bg-bg-subtle text-fg border border-border-strong" : "text-fg-muted hover:text-fg"
-              }`}
-            >
+            <Tab key={s} active={statusFilter === s} onClick={() => setStatusFilter(s)}>
               {s}
-            </button>
+            </Tab>
           ))}
-        </div>
+        </TabBar>
         <div className="p-2">
           {filtered.length === 0 ? (
             <Empty title="No decisions yet" hint="Record rationale so agents and teammates follow the same direction." />
           ) : (
             <div className="flex flex-col">
               {filtered.map((d) => (
-                <div key={d.id} className="rounded-lg border border-transparent px-3 py-2 hover:border-border hover:bg-bg-subtle/40 transition-colors">
+                <div key={d.id} className="rounded-md border border-transparent px-3 py-2 hover:border-border hover:bg-bg-subtle/40 transition-colors">
                   <div className="flex items-center gap-2">
                     <span className="flex-1 text-[12px] font-medium text-fg">{d.title}</span>
                     <Badge tone={d.status === "open" ? "amber" : d.status === "accepted" ? "green" : "dim"}>{d.status}</Badge>

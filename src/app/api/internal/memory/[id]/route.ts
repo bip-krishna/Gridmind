@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { authenticateAgent } from "@/lib/internal-auth";
-import { updateMemory, getProject, type MemoryType } from "@/lib/db";
+import { updateMemory, getMemory, getProject, type MemoryType } from "@/lib/db";
 import { publish } from "@/lib/events";
 
 export const runtime = "nodejs";
@@ -31,8 +31,33 @@ export async function PATCH(
   if (body.content !== undefined && !body.content?.trim()) {
     return NextResponse.json({ error: "content must be non-empty" }, { status: 400 });
   }
+  if (body.content !== undefined && body.content.length > 4000) {
+    return NextResponse.json({ error: "content must not exceed 4000 characters" }, { status: 400 });
+  }
   if (body.importance !== undefined && (body.importance < 1 || body.importance > 3)) {
     return NextResponse.json({ error: "importance must be between 1 and 3" }, { status: 400 });
+  }
+
+  // SEC-02: Check memory existence and enforce ownership authorization
+  const existing = getMemory(projectId, id);
+  if (!existing || existing.archived_at !== null) {
+    return NextResponse.json({ error: "memory not found or archived" }, { status: 404 });
+  }
+  if (existing.scope === "agent_private" && existing.session_id !== auth.session.id) {
+    return NextResponse.json(
+      { error: "forbidden — cannot modify another session's private memory" },
+      { status: 403 }
+    );
+  }
+  if (existing.scope === "task") {
+    if (auth.session.role !== "master") {
+      if (!auth.session.task_id || existing.task_id !== auth.session.task_id) {
+        return NextResponse.json(
+          { error: "forbidden — worker cannot modify another task's memory" },
+          { status: 403 }
+        );
+      }
+    }
   }
 
   const patch: { content?: string; type?: MemoryType; importance?: number } = {};

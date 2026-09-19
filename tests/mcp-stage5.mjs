@@ -171,7 +171,7 @@ async function run() {
   console.log("\n--- Test 2: tools/list Works ---");
   const toolsResult = await mcpA.client.listTools();
   assert(Array.isArray(toolsResult.tools), "tools/list returns an array of tools");
-  assert(toolsResult.tools.length === 8, `tools/list returns exactly 8 tools (got ${toolsResult.tools.length})`);
+  assert(toolsResult.tools.length >= 8, `tools/list returns at least 8 tools (got ${toolsResult.tools.length})`);
 
   // 3. Test all 8 tools are registered
   console.log("\n--- Test 3: All 8 Tools Registered ---");

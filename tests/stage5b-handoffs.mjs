@@ -263,6 +263,13 @@ async function run() {
   }, { Authorization: `Bearer ${sessA.token}` });
   assert(crossProjectHttp.status === 404, "Direct HTTP cross-project handoff rejected with 404");
 
+  // Project 2 worker cannot query Project 1 task handoffs
+  const clientCQuery = await clientC.callTool({
+    name: "gridmind_get_handoffs",
+    arguments: { task_id: task1A.id },
+  });
+  assert(clientCQuery.isError === true, "Project 2 worker cannot query Project 1 task handoffs via MCP");
+
   // ────────────────────────────────────────────────────────
   // Test 6: Worker can retrieve handoffs targeted at own task
   // ────────────────────────────────────────────────────────

@@ -150,6 +150,29 @@ function migrate(db: Database.Database): void {
 
   // Stage 3: unique index — no two tasks can share a worktree branch
   try { db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_worktree_branch ON tasks(worktree_branch) WHERE worktree_branch IS NOT NULL`); } catch { /* already exists */ }
+
+  // Stage 4: agent memory
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS memories (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      scope TEXT NOT NULL CHECK (scope IN ('project_shared', 'agent_private', 'task')),
+      session_id TEXT,
+      task_id TEXT,
+      type TEXT NOT NULL CHECK (type IN ('fact', 'discovery', 'constraint', 'note')),
+      content TEXT NOT NULL,
+      importance INTEGER NOT NULL DEFAULT 1 CHECK (importance BETWEEN 1 AND 3),
+      source TEXT NOT NULL CHECK (source IN ('agent', 'user', 'task', 'decision')),
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      archived_at INTEGER
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_memories_project_scope ON memories(project_id, scope);
+    CREATE INDEX IF NOT EXISTS idx_memories_project_task ON memories(project_id, task_id);
+    CREATE INDEX IF NOT EXISTS idx_memories_project_session ON memories(project_id, session_id);
+    CREATE INDEX IF NOT EXISTS idx_memories_project_archived ON memories(project_id, archived_at);
+  `);
 }
 
 export type Project = {
@@ -741,4 +764,131 @@ export function listEvents(projectId: string, limit = 200): EventRecord[] {
     .prepare("SELECT * FROM events WHERE project_id = ? ORDER BY id DESC LIMIT ?")
     .all(projectId, limit)
     .reverse() as EventRecord[];
+}
+
+// --- Memories (Stage 4: agent-discovered knowledge) ---
+
+export type MemoryScope = "project_shared" | "agent_private" | "task";
+export type MemoryType = "fact" | "discovery" | "constraint" | "note";
+export type MemorySource = "agent" | "user" | "task" | "decision";
+
+export type Memory = {
+  id: string;
+  project_id: string;
+  scope: MemoryScope;
+  session_id: string | null;
+  task_id: string | null;
+  type: MemoryType;
+  content: string;
+  importance: number;
+  source: MemorySource;
+  created_at: number;
+  updated_at: number;
+  archived_at: number | null;
+};
+
+export function getMemory(projectId: string, id: string): Memory | null {
+  const row = db()
+    .prepare("SELECT * FROM memories WHERE id = ? AND project_id = ?")
+    .get(id, projectId);
+  return (row as Memory) ?? null;
+}
+
+export function createMemory(
+  projectId: string,
+  input: {
+    id: string;
+    scope: MemoryScope;
+    type: MemoryType;
+    content: string;
+    importance?: number;
+    source: MemorySource;
+    session_id?: string | null;
+    task_id?: string | null;
+  }
+): Memory {
+  const t = now();
+  db()
+    .prepare(
+      `INSERT INTO memories (id, project_id, scope, session_id, task_id, type, content, importance, source, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+    .run(
+      input.id,
+      projectId,
+      input.scope,
+      input.session_id ?? null,
+      input.task_id ?? null,
+      input.type,
+      input.content,
+      input.importance ?? 1,
+      input.source,
+      t,
+      t
+    );
+  return getMemory(projectId, input.id)!;
+}
+
+export function listMemories(
+  projectId: string,
+  filters?: {
+    scope?: MemoryScope;
+    task_id?: string;
+    session_id?: string;
+    includeArchived?: boolean;
+  }
+): Memory[] {
+  let sql = "SELECT * FROM memories WHERE project_id = ?";
+  const params: unknown[] = [projectId];
+
+  if (filters?.scope) {
+    sql += " AND scope = ?";
+    params.push(filters.scope);
+  }
+  if (filters?.task_id) {
+    sql += " AND task_id = ?";
+    params.push(filters.task_id);
+  }
+  if (filters?.session_id) {
+    sql += " AND session_id = ?";
+    params.push(filters.session_id);
+  }
+  if (!filters?.includeArchived) {
+    sql += " AND archived_at IS NULL";
+  }
+
+  sql += " ORDER BY importance DESC, created_at DESC";
+  return db().prepare(sql).all(...params) as Memory[];
+}
+
+export function updateMemory(
+  projectId: string,
+  id: string,
+  patch: Partial<{
+    content: string;
+    type: MemoryType;
+    importance: number;
+  }>
+): Memory | null {
+  const existing = getMemory(projectId, id);
+  if (!existing) return null;
+  if (existing.archived_at !== null) return null;
+  const merged = { ...existing, ...patch, updated_at: now() };
+  db()
+    .prepare(
+      `UPDATE memories SET content = ?, type = ?, importance = ?, updated_at = ?
+       WHERE id = ? AND project_id = ?`
+    )
+    .run(merged.content, merged.type, merged.importance, merged.updated_at, id, projectId);
+  return getMemory(projectId, id);
+}
+
+export function archiveMemory(projectId: string, id: string): Memory | null {
+  const existing = getMemory(projectId, id);
+  if (!existing) return null;
+  if (existing.archived_at !== null) return existing;
+  db()
+    .prepare("UPDATE memories SET archived_at = ?, updated_at = ? WHERE id = ? AND project_id = ?")
+    .run(now(), now(), id, projectId);
+  return getMemory(projectId, id);
 }

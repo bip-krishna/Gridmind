@@ -116,7 +116,7 @@ export function registerWriteTools(server: McpServer, client: GridMindClient) {
     {
       type: z.enum(["agent:status", "agent:progress", "agent:decision", "agent:result"]).describe("Event type"),
       message: z.string().optional().describe("Optional status message"),
-      payload: z.record(z.unknown()).optional().describe("Optional structured metadata object"),
+      payload: z.record(z.string(), z.unknown()).optional().describe("Optional structured metadata object"),
     },
     async ({ type, message, payload }) => {
       try {

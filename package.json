@@ -4,7 +4,8 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build:mcp": "esbuild src/mcp/cli.ts --bundle --platform=node --format=esm --target=node18 --outfile=dist/mcp/cli.mjs --banner:js='import { createRequire } from \"module\"; const require = createRequire(import.meta.url);'",
+    "build": "next build && npm run build:mcp",
     "start": "next start",
     "lint": "eslint"
   },

@@ -2,6 +2,7 @@ import type { EventRecord } from "./db";
 import {
   appendSessionOutput,
   createSession,
+  createSessionWithTask,
   getProject,
   getSession,
   updateSession,
@@ -13,6 +14,7 @@ import { getAdapter, newId, type AgentMessage, type AgentType } from "./agents";
 import { publish } from "./events";
 import { invalidateRepoInfo } from "./git";
 import { nanoid } from "nanoid";
+import { validateTaskTransition } from "./task-transitions";
 
 const globalForRunner = globalThis as unknown as {
   __gridmindRunner?: { active: Map<string, boolean> };
@@ -47,35 +49,54 @@ export function startAgentSession(input: {
   if (!project) throw new Error("project not found");
 
   const token = nanoid(32);
+  const sessionId = newId();
 
-  const session = createSession(input.projectId, {
-    id: newId(),
-    agent_type: input.agentType,
-    role: input.role ?? "worker",
-    title: input.title,
-    prompt: input.prompt,
-    token,
-    agent_config_id: input.agentConfigId || undefined,
-  });
-
-  // Task dispatch: validate and link task to session
+  // I1: Atomic session + task creation when taskId is provided
+  let session: Session;
   let task = null;
+
   if (input.taskId) {
     task = getTask(input.projectId, input.taskId);
-    if (task) {
-      // Set task status to queued and link to session
-      updateTask(input.projectId, input.taskId, {
-        session_id: session.id,
-        assigned_agent: input.agentType,
-        status: "queued",
-      });
-      publish(input.projectId, "task:updated", {
-        id: task.id,
-        status: "queued",
-        sessionId: session.id,
-        agentType: input.agentType,
-      });
-    }
+    if (!task) throw new Error("task not found");
+
+    // Validate transition: todo → queued
+    const transitionError = validateTaskTransition(task.status, "queued");
+    if (transitionError) throw new Error(transitionError);
+
+    const result = createSessionWithTask(
+      input.projectId,
+      {
+        id: sessionId,
+        agent_type: input.agentType,
+        role: input.role ?? "worker",
+        title: input.title,
+        prompt: input.prompt,
+        token,
+        agent_config_id: input.agentConfigId || undefined,
+      },
+      input.taskId,
+      input.agentType
+    );
+    session = result.session;
+    task = result.task;
+
+    publish(input.projectId, "task:updated", {
+      id: task.id,
+      status: "queued",
+      sessionId: session.id,
+      agentType: input.agentType,
+    });
+  } else {
+    // Standalone session (no task)
+    session = createSession(input.projectId, {
+      id: sessionId,
+      agent_type: input.agentType,
+      role: input.role ?? "worker",
+      title: input.title,
+      prompt: input.prompt,
+      token,
+      agent_config_id: input.agentConfigId || undefined,
+    });
   }
 
   runnerState().active.set(session.id, true);
@@ -87,7 +108,6 @@ export function startAgentSession(input: {
     taskId: input.taskId || null,
   });
 
-  // Also publish session:started
   publish(input.projectId, "session:started", {
     sessionId: session.id,
     projectId: input.projectId,
@@ -109,14 +129,17 @@ export function startAgentSession(input: {
     return { session: getSession(input.projectId, session.id)! };
   }
 
-  // Transition task to in_progress when process starts
+  // Transition task: queued → in_progress
   if (input.taskId && task) {
-    updateTask(input.projectId, input.taskId, { status: "in_progress" });
-    publish(input.projectId, "task:started", {
-      id: input.taskId,
-      sessionId: session.id,
-      agentType: input.agentType,
-    });
+    const transitionError = validateTaskTransition(task.status, "in_progress");
+    if (!transitionError) {
+      updateTask(input.projectId, input.taskId, { status: "in_progress" });
+      publish(input.projectId, "task:started", {
+        id: input.taskId,
+        sessionId: session.id,
+        agentType: input.agentType,
+      });
+    }
   }
 
   // Build environment variables for agent → GridMind communication
@@ -136,7 +159,8 @@ export function startAgentSession(input: {
 
   let buf = "";
   let lastCd = 0;
-  let finalEmitted = false;
+  // I2: Closure guard — only one path can finalize
+  let finished = false;
   let agentReportedStatus: string | null = null;
 
   const emit = (msg: AgentMessage) => {
@@ -148,12 +172,11 @@ export function startAgentSession(input: {
       role: session.role,
       msg,
     });
-    if (msg.type === "status" && !finalEmitted) {
+    if (msg.type === "status" && !finished) {
       updateSession(input.projectId, session.id, { current_step: msg.step });
     }
-    if (msg.type === "final" && !finalEmitted) {
-      finalEmitted = true;
-      // Agent explicitly reported status — respect it if valid
+    if (msg.type === "final" && !finished) {
+      finished = true;
       if (msg.step && ["done", "blocked", "failed"].includes(msg.step)) {
         agentReportedStatus = msg.step;
       }
@@ -194,6 +217,8 @@ export function startAgentSession(input: {
   proc.stderr?.on("data", (c: Buffer) => feed(c));
 
   proc.on("error", (err) => {
+    if (finished) return;
+    finished = true;
     finishSession(
       session,
       { status: "error", current_step: "spawn-error", exit_code: -1 },
@@ -204,15 +229,15 @@ export function startAgentSession(input: {
   });
 
   proc.on("close", (code) => {
-    if (buf.length > 0) {
+    if (!finished && buf.length > 0) {
       try {
         adapter.onLine(buf, emit);
       } catch {
         /* ignore */
       }
     }
-    if (!finalEmitted) {
-      // Determine task status from exit code and agent reports
+    if (!finished) {
+      finished = true;
       let taskStatus = "done";
       if (agentReportedStatus) {
         taskStatus = agentReportedStatus;
@@ -273,15 +298,21 @@ function finishSession(
   // Update task status if linked
   if (taskId) {
     const finalTaskStatus = taskStatus || (patch.status === "done" ? "done" : "failed");
-    updateTask(session.project_id, taskId, { status: finalTaskStatus });
-    publish(session.project_id, `task:${finalTaskStatus === "done" ? "completed" : finalTaskStatus === "blocked" ? "blocked" : "failed"}`, {
-      id: taskId,
-      sessionId: session.id,
-      status: finalTaskStatus,
-    });
+    // Validate transition before applying
+    const currentTask = getTask(session.project_id, taskId);
+    if (currentTask) {
+      const transitionError = validateTaskTransition(currentTask.status, finalTaskStatus);
+      if (!transitionError) {
+        updateTask(session.project_id, taskId, { status: finalTaskStatus });
+        publish(session.project_id, `task:${finalTaskStatus === "done" ? "completed" : finalTaskStatus === "blocked" ? "blocked" : "failed"}`, {
+          id: taskId,
+          sessionId: session.id,
+          status: finalTaskStatus,
+        });
+      }
+    }
   }
 
-  // Publish session:finished
   publish(session.project_id, "session:finished", {
     sessionId: session.id,
     status: patch.status,

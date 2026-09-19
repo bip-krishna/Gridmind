@@ -87,6 +87,7 @@ function migrate(db: Database.Database): void {
       ended_at INTEGER,
       token TEXT,
       agent_config_id TEXT,
+      task_id TEXT,
       result_summary TEXT,
       result_status TEXT,
       result_files TEXT,
@@ -121,12 +122,17 @@ function migrate(db: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_agents_project ON agents(project_id);
     CREATE INDEX IF NOT EXISTS idx_tasks_project ON tasks(project_id);
     CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project_id);
+    CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions(token);
+    CREATE INDEX IF NOT EXISTS idx_sessions_task_id ON sessions(task_id);
     CREATE INDEX IF NOT EXISTS idx_events_project ON events(project_id, id);
   `);
 
   // Migration: add token/agent_config_id to sessions for existing DBs
   try { db.exec(`ALTER TABLE sessions ADD COLUMN token TEXT`); } catch { /* already exists */ }
   try { db.exec(`ALTER TABLE sessions ADD COLUMN agent_config_id TEXT`); } catch { /* already exists */ }
+
+  // Migration: add task_id to sessions
+  try { db.exec(`ALTER TABLE sessions ADD COLUMN task_id TEXT`); } catch { /* already exists */ }
 
   // Migration: add result fields to sessions
   try { db.exec(`ALTER TABLE sessions ADD COLUMN result_summary TEXT`); } catch { /* already exists */ }
@@ -176,6 +182,7 @@ export type Session = {
   ended_at: number | null;
   token: string | null;
   agent_config_id: string | null;
+  task_id: string | null;
   result_summary: string | null;
   result_status: string | null;
   result_files: string | null;
@@ -403,11 +410,6 @@ export function deleteTask(projectId: string, id: string): void {
   db().prepare("DELETE FROM tasks WHERE id = ? AND project_id = ?").run(id, projectId);
 }
 
-export function intToTaskStatus(v: unknown): undefined {
-  void v;
-  return undefined;
-}
-
 // --- Sessions ---
 
 export function listSessions(projectId: string): Session[] {
@@ -454,13 +456,14 @@ export function createSession(
     prompt: string;
     token?: string;
     agent_config_id?: string;
+    task_id?: string | null;
   }
 ): Session {
   const t = now();
   db()
     .prepare(
-      `INSERT INTO sessions (id, project_id, agent_type, role, title, prompt, status, current_step, output, created_at, started_at, token, agent_config_id)
-       VALUES (?, ?, ?, ?, ?, ?, 'running', 'starting', '', ?, ?, ?, ?)`
+      `INSERT INTO sessions (id, project_id, agent_type, role, title, prompt, status, current_step, output, created_at, started_at, token, agent_config_id, task_id)
+       VALUES (?, ?, ?, ?, ?, ?, 'running', 'starting', '', ?, ?, ?, ?, ?)`
     )
     .run(
       input.id,
@@ -472,7 +475,8 @@ export function createSession(
       t,
       t,
       input.token ?? null,
-      input.agent_config_id ?? null
+      input.agent_config_id ?? null,
+      input.task_id ?? null
     );
   return getSession(projectId, input.id)!;
 }
@@ -531,6 +535,61 @@ export function appendSessionOutput(
       `UPDATE sessions SET output = output || ? WHERE id = ? AND project_id = ?`
     )
     .run(chunk, id, projectId);
+}
+
+/**
+ * Atomically create a session and link it to a task.
+ * Both operations succeed or both are rolled back.
+ */
+export function createSessionWithTask(
+  projectId: string,
+  sessionInput: {
+    id: string;
+    agent_type: string;
+    role: string;
+    title: string;
+    prompt: string;
+    token?: string;
+    agent_config_id?: string;
+  },
+  taskId: string,
+  agentType: string
+): { session: Session; task: Task } {
+  const t = now();
+  const result = db().transaction(() => {
+    // Create session with task_id set
+    db()
+      .prepare(
+        `INSERT INTO sessions (id, project_id, agent_type, role, title, prompt, status, current_step, output, created_at, started_at, token, agent_config_id, task_id)
+         VALUES (?, ?, ?, ?, ?, ?, 'running', 'starting', '', ?, ?, ?, ?, ?)`
+      )
+      .run(
+        sessionInput.id,
+        projectId,
+        sessionInput.agent_type,
+        sessionInput.role,
+        sessionInput.title,
+        sessionInput.prompt,
+        t,
+        t,
+        sessionInput.token ?? null,
+        sessionInput.agent_config_id ?? null,
+        taskId
+      );
+
+    // Link task to session and set queued
+    db()
+      .prepare(
+        `UPDATE tasks SET session_id = ?, assigned_agent = ?, status = 'queued', updated_at = ?
+         WHERE id = ? AND project_id = ?`
+      )
+      .run(sessionInput.id, agentType, t, taskId, projectId);
+
+    const session = getSession(projectId, sessionInput.id)!;
+    const task = getTask(projectId, taskId)!;
+    return { session, task };
+  })();
+  return result;
 }
 
 // --- Agent orchestration (project-scoped team config) ---
@@ -639,17 +698,18 @@ export function getOrchestration(projectId: string): Orchestration {
 // --- Events ---
 
 export function insertEvent(projectId: string, type: string, payload: unknown): EventRecord {
+  const t = now();
   const info = db()
     .prepare(
       `INSERT INTO events (project_id, type, payload, created_at) VALUES (?, ?, ?, ?)`
     )
-    .run(projectId, type, JSON.stringify(payload), now());
+    .run(projectId, type, JSON.stringify(payload), t);
   return {
     id: Number(info.lastInsertRowid),
     project_id: projectId,
     type,
     payload: JSON.stringify(payload),
-    created_at: now(),
+    created_at: t,
   } as EventRecord;
 }
 

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { authenticateAgent } from "@/lib/internal-auth";
-import { getTask, updateTask, getProject, getSession, listTasksBySession } from "@/lib/db";
+import { getTask, updateTask, getProject } from "@/lib/db";
+import { validateTaskTransition } from "@/lib/task-transitions";
 import { publish } from "@/lib/events";
 
 export const runtime = "nodejs";
@@ -17,30 +18,26 @@ export async function POST(
   const { id: taskId } = await params;
   const session = auth.session;
 
-  // 1. Resolve project
+  // 1. Resolve project (project isolation — session must belong to this project's task)
   const project = getProject(session.project_id);
   if (!project) return NextResponse.json({ error: "project not found" }, { status: 404 });
 
-  // 2. Resolve task
+  // 2. Resolve task in the session's project
   const task = getTask(session.project_id, taskId);
   if (!task) {
     return NextResponse.json({ error: "task not found in this project" }, { status: 404 });
   }
 
-  // 3. Verify task belongs to same project as session
+  // 3. Verify task belongs to same project as session (defense-in-depth)
   if (task.project_id !== session.project_id) {
     return NextResponse.json({ error: "task does not belong to this project" }, { status: 403 });
   }
 
-  // 4. Verify session is linked to this task OR this agent owns the task
-  //    - If task.session_id is set, it must match this session
-  //    - If task.assigned_agent is set, it must match this session's agent_type
-  const sessionLinked = task.session_id === session.id;
-  const agentOwnsTask = task.assigned_agent === session.agent_type;
-
-  if (!sessionLinked && !agentOwnsTask) {
+  // 4. ONLY the session linked to this task may update it.
+  //    agent_type is NOT an identity — multiple sessions share the same agent_type.
+  if (task.session_id !== session.id) {
     return NextResponse.json(
-      { error: "agent is not assigned to this task and session is not linked" },
+      { error: "session is not linked to this task" },
       { status: 403 }
     );
   }
@@ -56,6 +53,12 @@ export async function POST(
       { error: `invalid status: ${body.status}. Valid: ${VALID_STATUSES.join(", ")}` },
       { status: 400 }
     );
+  }
+
+  // 5. Validate status transition
+  const transitionError = validateTaskTransition(task.status, body.status);
+  if (transitionError) {
+    return NextResponse.json({ error: transitionError }, { status: 400 });
   }
 
   const patch: { status: string; description?: string } = { status: body.status };

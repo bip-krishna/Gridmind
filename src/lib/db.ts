@@ -172,6 +172,30 @@ function migrate(db: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_memories_project_task ON memories(project_id, task_id);
     CREATE INDEX IF NOT EXISTS idx_memories_project_session ON memories(project_id, session_id);
     CREATE INDEX IF NOT EXISTS idx_memories_project_archived ON memories(project_id, archived_at);
+
+    -- Stage 5B: Agent handoffs
+    CREATE TABLE IF NOT EXISTS handoffs (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      source_session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+      source_task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+      target_task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+      summary TEXT NOT NULL,
+      completed_work TEXT NOT NULL,
+      changed_files TEXT NOT NULL DEFAULT '[]',
+      decisions TEXT NOT NULL DEFAULT '[]',
+      blockers TEXT NOT NULL DEFAULT '[]',
+      next_steps TEXT NOT NULL DEFAULT '[]',
+      status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'accepted', 'completed', 'cancelled')),
+      created_at INTEGER NOT NULL,
+      consumed_at INTEGER
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_handoffs_project ON handoffs(project_id);
+    CREATE INDEX IF NOT EXISTS idx_handoffs_source_session ON handoffs(source_session_id);
+    CREATE INDEX IF NOT EXISTS idx_handoffs_source_task ON handoffs(source_task_id);
+    CREATE INDEX IF NOT EXISTS idx_handoffs_target_task ON handoffs(target_task_id);
+    CREATE INDEX IF NOT EXISTS idx_handoffs_project_status ON handoffs(project_id, status);
   `);
 }
 
@@ -297,6 +321,8 @@ export function deleteProject(id: string): void {
     db().prepare("DELETE FROM events WHERE project_id = ?").run(id);
     db().prepare("DELETE FROM context_entries WHERE project_id = ?").run(id);
     db().prepare("DELETE FROM decisions WHERE project_id = ?").run(id);
+    db().prepare("DELETE FROM handoffs WHERE project_id = ?").run(id);
+    db().prepare("DELETE FROM memories WHERE project_id = ?").run(id);
     db().prepare("DELETE FROM tasks WHERE project_id = ?").run(id);
     db().prepare("DELETE FROM sessions WHERE project_id = ?").run(id);
     db().prepare("DELETE FROM projects WHERE id = ?").run(id);
@@ -891,4 +917,170 @@ export function archiveMemory(projectId: string, id: string): Memory | null {
     .prepare("UPDATE memories SET archived_at = ?, updated_at = ? WHERE id = ? AND project_id = ?")
     .run(now(), now(), id, projectId);
   return getMemory(projectId, id);
+}
+
+// --- Handoffs (Stage 5B: Agent-to-Agent Structured Handoffs) ---
+
+export type HandoffStatus = "pending" | "accepted" | "completed" | "cancelled";
+
+export type HandoffRecord = {
+  id: string;
+  project_id: string;
+  source_session_id: string;
+  source_task_id: string;
+  target_task_id: string;
+  summary: string;
+  completed_work: string;
+  changed_files: string;
+  decisions: string;
+  blockers: string;
+  next_steps: string;
+  status: HandoffStatus;
+  created_at: number;
+  consumed_at: number | null;
+};
+
+export type Handoff = {
+  id: string;
+  project_id: string;
+  source_session_id: string;
+  source_task_id: string;
+  target_task_id: string;
+  summary: string;
+  completed_work: string;
+  changed_files: string[];
+  decisions: string[];
+  blockers: string[];
+  next_steps: string[];
+  status: HandoffStatus;
+  created_at: number;
+  consumed_at: number | null;
+};
+
+export function deserializeHandoff(row: HandoffRecord): Handoff {
+  let changed_files: string[] = [];
+  let decisions: string[] = [];
+  let blockers: string[] = [];
+  let next_steps: string[] = [];
+
+  try { changed_files = JSON.parse(row.changed_files); } catch { /* ignore */ }
+  try { decisions = JSON.parse(row.decisions); } catch { /* ignore */ }
+  try { blockers = JSON.parse(row.blockers); } catch { /* ignore */ }
+  try { next_steps = JSON.parse(row.next_steps); } catch { /* ignore */ }
+
+  return {
+    ...row,
+    changed_files: Array.isArray(changed_files) ? changed_files : [],
+    decisions: Array.isArray(decisions) ? decisions : [],
+    blockers: Array.isArray(blockers) ? blockers : [],
+    next_steps: Array.isArray(next_steps) ? next_steps : [],
+  };
+}
+
+export function getHandoff(projectId: string, id: string): Handoff | null {
+  const row = db()
+    .prepare("SELECT * FROM handoffs WHERE id = ? AND project_id = ?")
+    .get(id, projectId) as HandoffRecord | undefined;
+  return row ? deserializeHandoff(row) : null;
+}
+
+export function createHandoff(
+  projectId: string,
+  input: {
+    id: string;
+    source_session_id: string;
+    source_task_id: string;
+    target_task_id: string;
+    summary: string;
+    completed_work: string;
+    changed_files?: string[];
+    decisions?: string[];
+    blockers?: string[];
+    next_steps?: string[];
+    status?: HandoffStatus;
+  }
+): Handoff {
+  const t = now();
+  const changedFilesJson = JSON.stringify(input.changed_files ?? []);
+  const decisionsJson = JSON.stringify(input.decisions ?? []);
+  const blockersJson = JSON.stringify(input.blockers ?? []);
+  const nextStepsJson = JSON.stringify(input.next_steps ?? []);
+
+  db()
+    .prepare(
+      `INSERT INTO handoffs (
+        id, project_id, source_session_id, source_task_id, target_task_id,
+        summary, completed_work, changed_files, decisions, blockers, next_steps,
+        status, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+    .run(
+      input.id,
+      projectId,
+      input.source_session_id,
+      input.source_task_id,
+      input.target_task_id,
+      input.summary,
+      input.completed_work,
+      changedFilesJson,
+      decisionsJson,
+      blockersJson,
+      nextStepsJson,
+      input.status ?? "pending",
+      t
+    );
+
+  return getHandoff(projectId, input.id)!;
+}
+
+export function listHandoffs(
+  projectId: string,
+  filters?: {
+    target_task_id?: string;
+    source_task_id?: string;
+    task_id?: string;
+    status?: HandoffStatus;
+  }
+): Handoff[] {
+  let sql = "SELECT * FROM handoffs WHERE project_id = ?";
+  const params: unknown[] = [projectId];
+
+  if (filters?.target_task_id) {
+    sql += " AND target_task_id = ?";
+    params.push(filters.target_task_id);
+  }
+  if (filters?.source_task_id) {
+    sql += " AND source_task_id = ?";
+    params.push(filters.source_task_id);
+  }
+  if (filters?.task_id) {
+    sql += " AND (target_task_id = ? OR source_task_id = ?)";
+    params.push(filters.task_id, filters.task_id);
+  }
+  if (filters?.status) {
+    sql += " AND status = ?";
+    params.push(filters.status);
+  }
+
+  sql += " ORDER BY created_at DESC";
+  const rows = db().prepare(sql).all(...params) as HandoffRecord[];
+  return rows.map(deserializeHandoff);
+}
+
+export function updateHandoffStatus(
+  projectId: string,
+  id: string,
+  status: HandoffStatus,
+  consumedAt?: number | null
+): Handoff | null {
+  const existing = getHandoff(projectId, id);
+  if (!existing) return null;
+
+  const t = consumedAt !== undefined ? consumedAt : (status === "accepted" ? now() : existing.consumed_at);
+
+  db()
+    .prepare("UPDATE handoffs SET status = ?, consumed_at = ? WHERE id = ? AND project_id = ?")
+    .run(status, t, id, projectId);
+
+  return getHandoff(projectId, id);
 }

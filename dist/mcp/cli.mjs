@@ -42326,6 +42326,36 @@ var GridMindClient = class {
       }
     });
   }
+  /**
+   * Stage 5B: Create structured handoff to another task in the project.
+   */
+  async createHandoff(input2) {
+    return this.request("POST", "/api/internal/handoffs", {
+      target_task_id: input2.targetTaskId,
+      summary: input2.summary,
+      completed_work: input2.completedWork,
+      changed_files: input2.changedFiles,
+      decisions: input2.decisions,
+      blockers: input2.blockers,
+      next_steps: input2.nextSteps
+    });
+  }
+  /**
+   * Stage 5B: Retrieve handoffs relevant to current task (worker) or project (master).
+   */
+  async getHandoffs(options) {
+    const params = new URLSearchParams();
+    if (options?.taskId) params.set("task_id", options.taskId);
+    if (options?.status) params.set("status", options.status);
+    const query = params.toString() ? `?${params.toString()}` : "";
+    return this.request("GET", `/api/internal/handoffs${query}`);
+  }
+  /**
+   * Stage 5B: Accept a handoff targeted at the worker's task.
+   */
+  async acceptHandoff(handoffId) {
+    return this.request("POST", `/api/internal/handoffs/${encodeURIComponent(handoffId)}/accept`);
+  }
 };
 
 // src/mcp/tools/read-tools.ts
@@ -42580,6 +42610,103 @@ function registerWriteTools(server, client) {
   );
 }
 
+// src/mcp/tools/handoff-tools.ts
+function registerHandoffTools(server, client) {
+  server.tool(
+    "gridmind_create_handoff",
+    "Create a structured handoff to pass completed work, decisions, blockers, and next steps to another task in the project. Source session, source task, and project are derived strictly from the authenticated session.",
+    {
+      target_task_id: external_exports.string().min(1).describe("Target task ID to receive this handoff (must belong to the same project)"),
+      summary: external_exports.string().min(1).max(1e3).describe("Concise summary of work completed / status (max 1000 chars)"),
+      completed_work: external_exports.string().min(1).max(4e3).describe("Detailed technical explanation of completed work (max 4000 chars)"),
+      changed_files: external_exports.array(external_exports.string().max(200)).max(50).optional().describe("List of modified or created file paths"),
+      decisions: external_exports.array(external_exports.string().max(500)).max(20).optional().describe("Key architectural or technical decisions made"),
+      blockers: external_exports.array(external_exports.string().max(500)).max(20).optional().describe("Known blockers or dependencies for the receiving agent"),
+      next_steps: external_exports.array(external_exports.string().max(500)).max(20).optional().describe("Recommended next steps for the receiving task")
+    },
+    async ({ target_task_id, summary, completed_work, changed_files, decisions, blockers, next_steps }) => {
+      try {
+        const result = await client.createHandoff({
+          targetTaskId: target_task_id,
+          summary,
+          completedWork: completed_work,
+          changedFiles: changed_files,
+          decisions,
+          blockers,
+          nextSteps: next_steps
+        });
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(result, null, 2)
+            }
+          ]
+        };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        return {
+          isError: true,
+          content: [{ type: "text", text: `Failed to create handoff: ${message}` }]
+        };
+      }
+    }
+  );
+  server.tool(
+    "gridmind_get_handoffs",
+    "Retrieve structured handoffs. Workers automatically receive handoffs relevant to their assigned task. Masters may query across project tasks.",
+    {
+      task_id: external_exports.string().optional().describe("Optional task ID filter (workers can only specify assigned task; masters can query project tasks)"),
+      status: external_exports.enum(["pending", "accepted", "completed", "cancelled"]).optional().describe("Filter by handoff status")
+    },
+    async ({ task_id, status }) => {
+      try {
+        const result = await client.getHandoffs({ taskId: task_id, status });
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(result, null, 2)
+            }
+          ]
+        };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        return {
+          isError: true,
+          content: [{ type: "text", text: `Failed to get handoffs: ${message}` }]
+        };
+      }
+    }
+  );
+  server.tool(
+    "gridmind_accept_handoff",
+    "Accept and consume a handoff targeted at your assigned task. Idempotent: returning existing accepted record if already accepted.",
+    {
+      handoff_id: external_exports.string().min(1).describe("ID of the handoff to accept")
+    },
+    async ({ handoff_id }) => {
+      try {
+        const result = await client.acceptHandoff(handoff_id);
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(result, null, 2)
+            }
+          ]
+        };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        return {
+          isError: true,
+          content: [{ type: "text", text: `Failed to accept handoff: ${message}` }]
+        };
+      }
+    }
+  );
+}
+
 // src/mcp/server.ts
 function createGridMindMcpServer(options) {
   const server = new McpServer({
@@ -42589,6 +42716,7 @@ function createGridMindMcpServer(options) {
   const client = options?.client ?? new GridMindClient(options?.clientOptions);
   registerReadTools(server, client);
   registerWriteTools(server, client);
+  registerHandoffTools(server, client);
   return server;
 }
 

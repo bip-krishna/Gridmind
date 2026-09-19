@@ -12,10 +12,11 @@ import { TimelinePanel } from "@/components/panels/timeline-panel";
 import { GithubPanel } from "@/components/panels/github-panel";
 import { ContextPanel } from "@/components/panels/context-panel";
 import { AgentSetupPanel } from "@/components/panels/agentsetup-panel";
+import { HandoffsPanel } from "@/components/panels/handoffs-panel";
 import { TeamGraph } from "@/components/topology";
 import { composeTopologyCards, type AgentCardInfo } from "@/lib/topology";
 
-type Tab = "overview" | "agents" | "tasks" | "git" | "timeline" | "github" | "context" | "agentsetup";
+type Tab = "overview" | "agents" | "tasks" | "handoffs" | "git" | "timeline" | "github" | "context" | "agentsetup";
 
 const TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
   {
@@ -60,6 +61,17 @@ const TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
         <rect x="3" y="5" width="6" height="6" rx="1" />
         <path d="M12 8h9M12 14h9M12 20h9" />
         <path d="M5 15l1.5 1.5L9 14" />
+      </svg>
+    ),
+  },
+  {
+    id: "handoffs",
+    label: "Handoffs",
+    icon: (
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M17 11l4 4-4 4" />
+        <path d="M7 13l-4-4 4-4" />
+        <path d="M21 15H9a4 4 0 01-4-4V7" />
       </svg>
     ),
   },
@@ -234,6 +246,7 @@ export function ControlPlane({
             <AgentsPanel projectId={projectId} refreshKey={refreshKey} focusSessionId={focusSessionId} onFocusConsumed={() => setFocusSessionId(null)} />
           )}
           {tab === "tasks" && <TasksPanel projectId={projectId} refreshKey={refreshKey} />}
+          {tab === "handoffs" && <HandoffsPanel projectId={projectId} refreshKey={refreshKey} />}
           {tab === "git" && <GitPanel projectId={projectId} refreshKey={refreshKey} />}
           {tab === "timeline" && <TimelinePanel projectId={projectId} refreshKey={refreshKey} />}
           {tab === "github" && <GithubPanel projectId={projectId} refreshKey={refreshKey} />}
@@ -411,6 +424,18 @@ function eventMeta(type: string, payload: Record<string, unknown>): { label: str
       return { label: "task updated", detail: String(payload.status ?? ""), dot: "bg-purple" };
     case "task:deleted":
       return { label: "task deleted", dot: "bg-red" };
+    case "handoff:created":
+      return {
+        label: "handoff created",
+        detail: `${String(payload.source_task_id ?? "")} → ${String(payload.target_task_id ?? "")}`,
+        dot: "bg-amber",
+      };
+    case "handoff:accepted":
+      return {
+        label: "handoff accepted",
+        detail: `${String(payload.source_task_id ?? "")} → ${String(payload.target_task_id ?? "")}`,
+        dot: "bg-green",
+      };
     case "context:set":
       return { label: "context set", detail: String(payload.key ?? ""), dot: "bg-green" };
     case "decision:created":

@@ -286,4 +286,101 @@ export class GridMindClient {
       },
     });
   }
+
+  /**
+   * Stage 5B: Create structured handoff to another task in the project.
+   */
+  async createHandoff(input: {
+    targetTaskId: string;
+    summary: string;
+    completedWork: string;
+    changedFiles?: string[];
+    decisions?: string[];
+    blockers?: string[];
+    nextSteps?: string[];
+  }) {
+    return this.request<{
+      ok: boolean;
+      handoff: {
+        id: string;
+        project_id: string;
+        source_session_id: string;
+        source_task_id: string;
+        target_task_id: string;
+        summary: string;
+        completed_work: string;
+        changed_files: string[];
+        decisions: string[];
+        blockers: string[];
+        next_steps: string[];
+        status: string;
+        created_at: number;
+        consumed_at: number | null;
+      };
+    }>("POST", "/api/internal/handoffs", {
+      target_task_id: input.targetTaskId,
+      summary: input.summary,
+      completed_work: input.completedWork,
+      changed_files: input.changedFiles,
+      decisions: input.decisions,
+      blockers: input.blockers,
+      next_steps: input.nextSteps,
+    });
+  }
+
+  /**
+   * Stage 5B: Retrieve handoffs relevant to current task (worker) or project (master).
+   */
+  async getHandoffs(options?: { taskId?: string; status?: string }) {
+    const params = new URLSearchParams();
+    if (options?.taskId) params.set("task_id", options.taskId);
+    if (options?.status) params.set("status", options.status);
+    const query = params.toString() ? `?${params.toString()}` : "";
+
+    return this.request<{
+      ok: boolean;
+      handoffs: Array<{
+        id: string;
+        project_id: string;
+        source_session_id: string;
+        source_task_id: string;
+        target_task_id: string;
+        summary: string;
+        completed_work: string;
+        changed_files: string[];
+        decisions: string[];
+        blockers: string[];
+        next_steps: string[];
+        status: string;
+        created_at: number;
+        consumed_at: number | null;
+      }>;
+    }>("GET", `/api/internal/handoffs${query}`);
+  }
+
+  /**
+   * Stage 5B: Accept a handoff targeted at the worker's task.
+   */
+  async acceptHandoff(handoffId: string) {
+    return this.request<{
+      ok: boolean;
+      handoff: {
+        id: string;
+        project_id: string;
+        source_session_id: string;
+        source_task_id: string;
+        target_task_id: string;
+        summary: string;
+        completed_work: string;
+        changed_files: string[];
+        decisions: string[];
+        blockers: string[];
+        next_steps: string[];
+        status: string;
+        created_at: number;
+        consumed_at: number | null;
+      };
+      already_accepted?: boolean;
+    }>("POST", `/api/internal/handoffs/${encodeURIComponent(handoffId)}/accept`);
+  }
 }

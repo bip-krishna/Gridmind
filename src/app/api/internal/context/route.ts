@@ -51,6 +51,7 @@ export async function GET(req: Request) {
 
   const { getTask, listContext } = await import("@/lib/db");
   const { retrieveMemories } = await import("@/lib/memory");
+  const { retrieveTaskHandoffs } = await import("@/lib/handoff");
 
   let effectiveTaskId = auth.session.task_id;
   if (auth.session.role === "master" && requestedTaskId) {
@@ -75,6 +76,15 @@ export async function GET(req: Request) {
     maxTokens: 1000,
   });
 
+  // Stage 5B: Retrieve relevant handoffs for the task
+  const handoffsResult = effectiveTaskId
+    ? retrieveTaskHandoffs({
+        projectId: auth.session.project_id,
+        taskId: effectiveTaskId,
+        maxTokens: 600,
+      })
+    : { handoffs: [], handoffsBrief: "", tokensUsed: 0, totalCandidates: 0, omittedCount: 0 };
+
   return NextResponse.json({
     ok: true,
     project: {
@@ -94,6 +104,8 @@ export async function GET(req: Request) {
     context: projectContext,
     memories: memoryResult.memories,
     contextBrief: memoryResult.contextBrief,
+    handoffs: handoffsResult.handoffs,
+    handoffsBrief: handoffsResult.handoffsBrief,
   });
 }
 

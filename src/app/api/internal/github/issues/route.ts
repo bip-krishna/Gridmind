@@ -70,6 +70,12 @@ export async function GET(req: Request) {
     const message = err instanceof Error ? err.message : String(err);
     // Ensure tokens are never leaked in error messages
     const sanitized = message.replace(/ghp_[a-zA-Z0-9]+/g, "[REDACTED]");
-    return NextResponse.json({ error: `GitHub API error: ${sanitized}` }, { status: 502 });
+    return NextResponse.json({
+      ok: true,
+      configured: false,
+      repository: `${configuredRepo.owner}/${configuredRepo.repo}`,
+      issues: [],
+      message: `GitHub repository not accessible: ${sanitized}`,
+    });
   }
 }

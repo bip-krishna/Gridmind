@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import fs from "node:fs";
+import path from "node:path";
 import { authenticateAgent } from "@/lib/internal-auth";
 import { resolveSessionWorktree, isPathSafe, runGitSafe } from "@/lib/git-internal";
 
@@ -72,6 +74,35 @@ export async function POST(req: Request) {
     }
 
     let diffOutput = await runGitSafe(worktreePath, gitArgs, { allowFail: true });
+
+    // Include untracked files in working tree diff if not inspecting staged or specific commit
+    if (!commitRef && !staged) {
+      const untrackedOut = await runGitSafe(worktreePath, ["ls-files", "--others", "--exclude-standard"], { allowFail: true });
+      const untrackedFiles = untrackedOut.split("\n").map((f) => f.trim()).filter(Boolean);
+      for (const uf of untrackedFiles) {
+        if (filterPath && uf !== filterPath) continue;
+        const fullP = path.join(worktreePath, uf);
+        try {
+          if (fs.existsSync(fullP) && fs.statSync(fullP).isFile()) {
+            const content = fs.readFileSync(fullP, "utf8");
+            const lines = content.split("\n");
+            if (lines.length === 1 && lines[0] === "") lines.pop();
+            const fileDiff =
+              `\ndiff --git a/${uf} b/${uf}\n` +
+              `new file mode 100644\n` +
+              `--- /dev/null\n` +
+              `+++ b/${uf}\n` +
+              `@@ -0,0 +1,${lines.length} @@\n` +
+              lines.map((l) => `+${l}`).join("\n") +
+              "\n";
+            diffOutput += fileDiff;
+          }
+        } catch {
+          // Ignore read errors
+        }
+      }
+    }
+
     let truncated = false;
 
     if (diffOutput.length > MAX_DIFF_CHARS) {

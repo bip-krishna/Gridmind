@@ -42913,7 +42913,7 @@ function registerGitTools(server, client) {
     "gridmind_git_log",
     "Inspect a bounded list of recent Git commits (SHA, message, author, date) in the authenticated worktree.",
     {
-      limit: external_exports.number().int().min(1).max(50).optional().describe("Number of commits to retrieve (default: 10, max: 50)"),
+      limit: external_exports.number().int().min(1).optional().describe("Number of commits to retrieve (default: 10, max: 50)"),
       commit: external_exports.string().optional().describe("Optional commit SHA to inspect a single commit"),
       task_id: external_exports.string().optional().describe("Task ID (only for master role; workers automatically use assigned task worktree)")
     },

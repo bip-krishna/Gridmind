@@ -172,10 +172,10 @@ async function run() {
 
   assert(true, "All 4 MCP clients connected via stdio");
 
-  // Verify MCP Tools List: 8 (Phase 1) + 3 (Stage 5B) = 11 tools
+  // Verify MCP Tools List: at least 11 tools (8 Phase 1 + 3 Stage 5B + optional Stage 5C)
   console.log("\n--- Verify MCP Tool Registration ---");
   const toolsList = await clientA.listTools();
-  assert(toolsList.tools && toolsList.tools.length === 11, `tools/list returns exactly 11 tools (got ${toolsList.tools?.length})`);
+  assert(toolsList.tools && toolsList.tools.length >= 11, `tools/list returns at least 11 tools (got ${toolsList.tools?.length})`);
 
   const toolNames = new Set(toolsList.tools.map((t) => t.name));
   assert(toolNames.has("gridmind_create_handoff"), "Tool registered: gridmind_create_handoff");

@@ -86,7 +86,9 @@ export async function getRepoInfo(repoPath: string): Promise<GitRepoInfo> {
   } catch {
     info = { isRepo: false, branch: "", remote: null, filesChanged: 0, dirty: false };
   }
-  repoInfoCache.set(repoPath, info);
+  if (info.isRepo) {
+    repoInfoCache.set(repoPath, info);
+  }
   return info;
 }
 

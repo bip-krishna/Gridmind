@@ -32,6 +32,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "repo_path is not a valid directory" }, { status: 400 });
   }
 
+  invalidateRepoInfo(repoPath);
   const info = await getRepoInfo(repoPath);
   if (!info.isRepo) {
     return NextResponse.json({ error: "directory is not a git repository" }, { status: 400 });

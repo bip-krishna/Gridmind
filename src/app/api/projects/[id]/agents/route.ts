@@ -67,7 +67,7 @@ export async function POST(
     prompt = buildMasterPrompt(id, prompt, orchestration);
   }
 
-  const { session } = startAgentSession({
+  const { session } = await startAgentSession({
     projectId: id,
     agentType: effectiveAgentType,
     role,

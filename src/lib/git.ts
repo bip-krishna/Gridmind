@@ -1,6 +1,7 @@
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
 import fs from "node:fs";
+import path from "node:path";
 
 export const execAsync = promisify(exec);
 
@@ -222,4 +223,65 @@ export async function getCurrentBranch(repoPath: string): Promise<string> {
 export async function getRecentPrs(repoPath: string): Promise<string[]> {
   const out = await runGit(repoPath, ["log", "--oneline", "--all", "--max-count=50"], { allowFail: true });
   return out.trim().split("\n").filter(Boolean);
+}
+
+// --- Stage 3: Git worktree operations ---
+
+/** Create a worktree with a new branch based on baseBranch. */
+export async function worktreeAdd(
+  repoPath: string,
+  worktreePath: string,
+  branchName: string,
+  baseBranch: string
+): Promise<void> {
+  const parent = path.dirname(worktreePath);
+  fs.mkdirSync(parent, { recursive: true });
+  await runGit(repoPath, ["worktree", "add", worktreePath, "-b", branchName, baseBranch]);
+}
+
+/** Remove a worktree. Use force=true to allow removing dirty worktrees. */
+export async function worktreeRemove(
+  repoPath: string,
+  worktreePath: string,
+  force = false
+): Promise<void> {
+  const args = ["worktree", "remove", worktreePath];
+  if (force) args.push("--force");
+  await runGit(repoPath, args);
+}
+
+/** List all worktree paths registered in the repo. */
+export async function worktreeListPaths(repoPath: string): Promise<string[]> {
+  const out = await runGit(repoPath, ["worktree", "list", "--porcelain"], { allowFail: true });
+  return out
+    .split("\n")
+    .filter((l) => l.startsWith("worktree "))
+    .map((l) => l.slice("worktree ".length));
+}
+
+/** Check if a path is a valid Git worktree. */
+export async function isGitWorktree(wtPath: string): Promise<boolean> {
+  try {
+    const out = await runGit(wtPath, ["rev-parse", "--is-inside-work-tree"], { allowFail: true });
+    return out.trim() === "true";
+  } catch {
+    return false;
+  }
+}
+
+/** Deterministic branch name: gridmind/{taskId}/{attempt} */
+export function worktreeBranchName(taskId: string, attempt: number): string {
+  return `gridmind/${taskId}/${attempt}`;
+}
+
+/** Resolve the next available branch name for a task by scanning existing branches. */
+export async function nextWorktreeBranch(repoPath: string, taskId: string): Promise<string> {
+  const branches = await listBranches(repoPath);
+  const prefix = `gridmind/${taskId}/`;
+  const existing = branches.filter((b) => b.startsWith(prefix));
+  const maxAttempt = existing.reduce((max, b) => {
+    const num = parseInt(b.slice(prefix.length), 10);
+    return isNaN(num) ? max : Math.max(max, num);
+  }, 0);
+  return worktreeBranchName(taskId, maxAttempt + 1);
 }

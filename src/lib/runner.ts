@@ -15,6 +15,7 @@ import { publish } from "./events";
 import { invalidateRepoInfo } from "./git";
 import { nanoid } from "nanoid";
 import { validateTaskTransition } from "./task-transitions";
+import { provisionWorktree } from "./worktree";
 
 const globalForRunner = globalThis as unknown as {
   __gridmindRunner?: { active: Map<string, boolean> };
@@ -36,7 +37,7 @@ export function isSessionActive(sessionId: string): boolean {
   return runnerState().active.get(sessionId) ?? false;
 }
 
-export function startAgentSession(input: {
+export async function startAgentSession(input: {
   projectId: string;
   agentType: AgentType | string;
   role?: string;
@@ -44,7 +45,7 @@ export function startAgentSession(input: {
   prompt: string;
   agentConfigId?: string;
   taskId?: string;
-}): StartAgentResult {
+}): Promise<StartAgentResult> {
   const project = getProject(input.projectId);
   if (!project) throw new Error("project not found");
 
@@ -99,6 +100,26 @@ export function startAgentSession(input: {
     });
   }
 
+  // Stage 3: Provision worktree if task is attached
+  let agentCwd = project.repo_path;
+  if (input.taskId && task) {
+    try {
+      const wtTask = await provisionWorktree(input.projectId, input.taskId);
+      if (wtTask.worktree_path) {
+        agentCwd = wtTask.worktree_path;
+        task = wtTask;
+      }
+    } catch (err) {
+      // Worktree provisioning failed — log but continue with main repo
+      const errMsg = err instanceof Error ? err.message : String(err);
+      appendSessionOutput(input.projectId, session.id, `[GridMind] Worktree provisioning failed: ${errMsg}\n`);
+      publish(input.projectId, "worktree:error", {
+        taskId: input.taskId,
+        error: errMsg,
+      });
+    }
+  }
+
   runnerState().active.set(session.id, true);
   publish(input.projectId, "agent:started", {
     sessionId: session.id,
@@ -151,6 +172,7 @@ export function startAgentSession(input: {
     GRIDMIND_AGENT_ID: input.agentConfigId || "",
     GRIDMIND_TASK_ID: input.taskId || "",
     GRIDMIND_TOKEN: token,
+    GRIDMIND_WORKTREE: agentCwd,
   };
 
   // Append GridMind API instructions to the prompt
@@ -191,7 +213,7 @@ export function startAgentSession(input: {
     }
   };
 
-  const spawned = adapter.spawn({ repoPath: project.repo_path, prompt: augmentedPrompt, title: input.title, env: agentEnv });
+  const spawned = adapter.spawn({ repoPath: project.repo_path, prompt: augmentedPrompt, title: input.title, cwd: agentCwd, env: agentEnv });
   const proc = spawned.proc;
 
   const feed = (chunk: Buffer | string) => {
@@ -310,6 +332,17 @@ function finishSession(
           status: finalTaskStatus,
         });
       }
+
+      // Stage 3: Transition worktree ready → retained
+      const freshTask = getTask(session.project_id, taskId);
+      if (freshTask && freshTask.worktree_status === "ready") {
+        updateTask(session.project_id, taskId, { worktree_status: "retained" });
+        publish(session.project_id, "worktree:retained", {
+          taskId,
+          worktreePath: freshTask.worktree_path,
+          branch: freshTask.worktree_branch,
+        });
+      }
     }
   }
 
@@ -334,6 +367,7 @@ Environment variables available in your shell:
   GRIDMIND_SESSION_ID - your session ID
   GRIDMIND_TASK_ID    - assigned task ID (may be empty)
   GRIDMIND_AGENT_ID   - your agent config ID (may be empty)
+  GRIDMIND_WORKTREE   - your working directory (worktree path; may equal main repo)
 
 Use these endpoints to report structured information back to GridMind.
 

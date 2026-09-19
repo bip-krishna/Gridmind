@@ -141,6 +141,15 @@ function migrate(db: Database.Database): void {
   try { db.exec(`ALTER TABLE sessions ADD COLUMN result_decisions TEXT`); } catch { /* already exists */ }
   try { db.exec(`ALTER TABLE sessions ADD COLUMN result_blockers TEXT`); } catch { /* already exists */ }
   try { db.exec(`ALTER TABLE sessions ADD COLUMN result_next_steps TEXT`); } catch { /* already exists */ }
+
+  // Stage 3: add worktree columns to tasks
+  try { db.exec(`ALTER TABLE tasks ADD COLUMN worktree_path TEXT`); } catch { /* already exists */ }
+  try { db.exec(`ALTER TABLE tasks ADD COLUMN worktree_branch TEXT`); } catch { /* already exists */ }
+  try { db.exec(`ALTER TABLE tasks ADD COLUMN worktree_status TEXT NOT NULL DEFAULT 'none'`); } catch { /* already exists */ }
+  try { db.exec(`ALTER TABLE tasks ADD COLUMN worktree_base_branch TEXT`); } catch { /* already exists */ }
+
+  // Stage 3: unique index — no two tasks can share a worktree branch
+  try { db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_worktree_branch ON tasks(worktree_branch) WHERE worktree_branch IS NOT NULL`); } catch { /* already exists */ }
 }
 
 export type Project = {
@@ -162,6 +171,10 @@ export type Task = {
   session_id: string | null;
   issue_number: number | null;
   branch: string | null;
+  worktree_path: string | null;
+  worktree_branch: string | null;
+  worktree_status: string;
+  worktree_base_branch: string | null;
   created_at: number;
   updated_at: number;
 };
@@ -379,6 +392,10 @@ export function updateTask(
     session_id: string | null;
     issue_number: number | null;
     branch: string | null;
+    worktree_path: string | null;
+    worktree_branch: string | null;
+    worktree_status: string;
+    worktree_base_branch: string | null;
   }>
 ): Task | null {
   const existing = getTask(projectId, id);
@@ -387,7 +404,9 @@ export function updateTask(
   db()
     .prepare(
       `UPDATE tasks SET title = ?, description = ?, status = ?, priority = ?,
-        assigned_agent = ?, session_id = ?, issue_number = ?, branch = ?, updated_at = ?
+        assigned_agent = ?, session_id = ?, issue_number = ?, branch = ?,
+        worktree_path = ?, worktree_branch = ?, worktree_status = ?, worktree_base_branch = ?,
+        updated_at = ?
        WHERE id = ? AND project_id = ?`
     )
     .run(
@@ -399,6 +418,10 @@ export function updateTask(
       merged.session_id,
       merged.issue_number,
       merged.branch,
+      merged.worktree_path,
+      merged.worktree_branch,
+      merged.worktree_status,
+      merged.worktree_base_branch,
       merged.updated_at,
       id,
       projectId

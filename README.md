@@ -381,3 +381,9 @@ npm run lint        # ESLint
 * **Ephemeral Cloud Worktrees**: Spin up sandboxed remote micro-VMs / Firecracker containers for untrusted agent code execution.
 * **Adversarial Agent PR Reviews**: Automated adversarial reviewer agents that analyze code diffs and test coverage before allowing merges.
 * **Decentralized Multi-Node Swarms**: Peer-to-peer agent coordination over WebRTC/WebSocket across distributed developer machines.
+
+### DEMOS
+https://drive.google.com/drive/folders/12Kn8fREOfxuj3BH6TYHzRo-s6AnFxXIe?usp=sharing
+
+
+

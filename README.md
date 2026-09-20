@@ -184,8 +184,11 @@ During the design, development, and testing of GridMind, AI tools—including **
 ### Step 1: Clone & Install
 
 ```bash
-git clone https://github.com/bip-krishna/Agentmind.git
-cd Agentmind
+# Clone the repository
+git clone https://github.com/bip-krishna/Gridmind.git
+cd Gridmind
+
+# Install dependencies
 npm install
 ```
 
@@ -193,32 +196,27 @@ npm install
 
 ### Step 2: Configure Environment Variables
 
-Copy the example environment file:
 ```bash
+# Copy example environment configuration
 cp .env.example .env.local
 ```
 
-Edit `.env.local`:
+*(Optional)* Edit `.env.local` if you plan to use GitHub PR creation or GitHub Issues import:
 ```env
-# Optional: Required only if using GitHub PR creation or GitHub Issues import
+# Required only for GitHub PR creation or GitHub Issues import
 GITHUB_TOKEN=ghp_yourPersonalAccessTokenHere
-
-# Optional: Default GitHub repository (owner/repo)
-# GITHUB_DEFAULT_REPO=your-org/your-repo
 ```
-*(If `GITHUB_TOKEN` is omitted, GridMind operates normally in local-only Git mode).*
+*(If `GITHUB_TOKEN` is omitted, GridMind runs normally in local-only Git mode).*
 
 ---
 
 ### Step 3: Build the MCP Server & Start the Web App
 
-Build the standalone MCP executable (`dist/mcp/cli.mjs`):
 ```bash
+# 1. Build the standalone Model Context Protocol (MCP) server
 npm run build:mcp
-```
 
-Start the Next.js development server:
-```bash
+# 2. Start the Next.js development server
 npm run dev
 ```
 
@@ -240,31 +238,37 @@ Open your browser to:
 
 ### Step 5: Connecting External MCP Clients (Part 2)
 
-Each agent session has an authentication token (`GRIDMIND_TOKEN`).
-
-#### Finding Your Token
-Query the SQLite database for active session tokens:
+#### 1. Retrieve an Active Token
+In a separate terminal, retrieve an active master token from GridMind's SQLite database:
 ```bash
-sqlite3 .gridmind/gridmind.db "SELECT token, role, agent_type, project_id FROM sessions ORDER BY created_at DESC LIMIT 5;"
+sqlite3 .gridmind/gridmind.db "SELECT token, role, project_id FROM sessions WHERE role='master' ORDER BY created_at DESC LIMIT 1;"
 ```
-*(Use a **master** token for IDE orchestrators like OpenCode/Cursor, or a **worker** token for task-specific agents).*
 
-#### OpenCode Configuration (`~/.config/opencode/opencode.jsonc`)
+#### 2. OpenCode Configuration (`~/.config/opencode/opencode.jsonc`)
+Add GridMind to your OpenCode configuration:
 ```jsonc
 {
   "$schema": "https://opencode.ai/config.json",
   "mcpServers": {
     "gridmind": {
       "command": "node",
-      "args": ["/absolute/path/to/Agentmind/dist/mcp/cli.mjs"],
+      "args": ["/Users/krishna/Codespace/Agentmind/dist/mcp/cli.mjs"],
       "env": {
         "GRIDMIND_API": "http://localhost:3000",
-        "GRIDMIND_TOKEN": "<YOUR_SESSION_TOKEN>"
+        "GRIDMIND_TOKEN": "<YOUR_SESSION_TOKEN_FROM_STEP_1>"
       }
     }
   }
 }
 ```
+*(Replace the path to `dist/mcp/cli.mjs` with your absolute installation path).*
+
+#### 3. Launch OpenCode
+```bash
+opencode
+```
+Inside OpenCode, prompt the model:
+> *"What tools are available?"* or *"Use gridmind_get_context to check the project state."*
 
 #### Claude Desktop Configuration (`claude_desktop_config.json`)
 ```json

@@ -132,10 +132,7 @@ During the design, development, and testing of GridMind, AI tools—including **
 
 ### Live Demo
 * **Local Web Dashboard**: [http://localhost:3000](http://localhost:3000) (run `npm run dev`)
-* **Live Deployment Link**: *[Add deployed project link here, if available]*
 
-### Demo / Pitch Video
-* **Demo / Pitch Video Link**: *[Add your YouTube / Loom video link here]*
 
 > **Demo Walkthrough**: The demo highlights a complete 2-agent swarm tackling a full-stack feature on a real codebase:
 > 1. **Human Operator (Part 1 - Web UI)**: Creates a project, defines Task A ("Implement backend auth") and Task B ("Build frontend login UI"), and provisions worktrees.

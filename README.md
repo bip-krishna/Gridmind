@@ -147,14 +147,31 @@ During the design, development, and testing of GridMind, AI tools—including **
 
 ## Screenshots
 
-| View | Component | Description |
-|---|---|---|
-| **Coordination Canvas** | Part 1: Web Dashboard | Interactive node graph showing tasks, assigned agents, branch names, commit SHAs, and active handoff edges. |
-| **Project Context & Memory** | Part 1: Web Dashboard | Dual-view panel displaying persistent key-values on the left and live learned memory stream (commits, facts, constraints) on the right. |
-| **Task & Worktree Manager** | Part 1: Web Dashboard | Management interface showing isolated worktree directories, branch statuses, and terminal execution logs. |
-| **OpenCode MCP Session** | Part 2: MCP Engine | OpenCode agent executing in the terminal, querying `gridmind_get_context`, and committing via `gridmind_git_commit`. |
+### 1. Multi-Agent Swarm Topology & Setup (Web Dashboard)
+*OpenCode master orchestrator supervising specialized worker subagents (`Architecture & Core Worker`, `Diagnostics & Integration Worker`) with live swarm status and one-click role replacement.*
 
-*(Screenshots can be added directly to this section or placed in `docs/images/`)*
+![Agent Swarm Topology & Setup](docs/images/agent-setup-topology.png)
+
+---
+
+### 2. Dual Context & Learned Memory Dashboard (Web Dashboard)
+*Left: Persistent project key-value store (`architecture_pattern`) with one-click brief copy and architectural decision log. Right: Real-time chronological memory stream capturing agent commits, task milestones, security policies, and importance badges (★).*
+
+![Project Context & Learned Memory](docs/images/project-context-memory.png)
+
+---
+
+### 3. Agent Execution Sessions & Real-Time Terminal Logs (Web Dashboard)
+*Monitoring active and completed worker sessions, execution duration, and live terminal output streamed from agents operating inside isolated task worktrees.*
+
+![Agent Sessions & Run Logs](docs/images/agent-sessions-runs.png)
+
+---
+
+### 4. External Agent MCP Integration (OpenCode Terminal)
+*OpenCode connected directly to the GridMind Model Context Protocol server (`MCP • gridmind Connected`), displaying available tools and utilizing GridMind's 20 native Git, task, handoff, and memory MCP tools.*
+
+![OpenCode MCP Session](docs/images/opencode-mcp-terminal.png)
 
 ---
 

@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
 import { authenticateAgent } from "@/lib/internal-auth";
 import { resolveSessionWorktree, runGitSafe } from "@/lib/git-internal";
-import { updateTask } from "@/lib/db";
+import { updateTask, createMemory, setContext } from "@/lib/db";
 import { publish } from "@/lib/events";
+import { nanoid } from "nanoid";
 
 export const runtime = "nodejs";
 
@@ -62,6 +63,23 @@ export async function POST(req: Request) {
     // Update task's latest_commit
     if (task) {
       updateTask(projectId, task.id, { latest_commit: commitSha });
+    }
+
+    // Auto-record commit to project memory so agents/system share context automatically
+    try {
+      createMemory(projectId, {
+        id: nanoid(),
+        scope: "project_shared",
+        type: "fact",
+        content: `Git commit ${shortSha} on ${branch}: "${message}"`,
+        importance: 2,
+        source: "agent",
+        session_id: auth.session.id,
+        task_id: task?.id ?? null,
+      });
+      setContext(projectId, "latest_commit", `${shortSha} — ${message}`);
+    } catch {
+      /* ignore automatic memory error */
     }
 
     // Publish git:commit event (no secrets, no private memory)

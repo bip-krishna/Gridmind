@@ -42275,6 +42275,15 @@ var GridMindClient = class {
     });
   }
   /**
+   * Set a project context key-value entry (directly visible on dashboard).
+   */
+  async setContext(input2) {
+    return this.request("POST", "/api/internal/context", {
+      key: input2.key,
+      value: input2.value
+    });
+  }
+  /**
    * 5. Get assigned or specified task details.
    */
   async getTask(taskId) {
@@ -42605,6 +42614,33 @@ function registerWriteTools(server, client) {
         return {
           isError: true,
           content: [{ type: "text", text: `Failed to record memory: ${message}` }]
+        };
+      }
+    }
+  );
+  server.tool(
+    "gridmind_set_context",
+    "Set a project context key-value entry (e.g. key='stack', value='Next.js 15 + TypeScript'). Directly visible in the GridMind Project Context dashboard.",
+    {
+      key: external_exports.string().min(1).describe("Context key (e.g. stack, conventions, architecture)"),
+      value: external_exports.string().describe("Context value content")
+    },
+    async ({ key, value }) => {
+      try {
+        const result = await client.setContext({ key, value });
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(result, null, 2)
+            }
+          ]
+        };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        return {
+          isError: true,
+          content: [{ type: "text", text: `Failed to set context: ${message}` }]
         };
       }
     }

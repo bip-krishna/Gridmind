@@ -22,8 +22,19 @@
   - [8. Create GitHub Pull Request](#8-create-github-pull-request)
   - [9. Visualize the Live Coordination Chain](#9-visualize-the-live-coordination-chain)
 - [Running the Live End-to-End Demo](#running-the-live-end-to-end-demo)
-- [Connecting External MCP Clients (Cursor, Claude Desktop, OpenCode)](#connecting-external-mcp-clients-cursor-claude-desktop-opencode)
-- [MCP Tools Reference](#mcp-tools-reference)
+- [Configuring & Using External MCP Clients (OpenCode, Claude Desktop, Cursor, Hermes)](#configuring--using-external-mcp-clients-opencode-claude-desktop-cursor-hermes)
+  - [1. Build the MCP Server](#1-build-the-mcp-server)
+  - [2. Understanding Authentication Tokens (Master vs. Worker)](#2-understanding-authentication-tokens-master-vs-worker)
+  - [3. OpenCode Configuration (`opencode.jsonc`)](#3-opencode-configuration-opencodejsonc)
+  - [4. Claude Desktop Configuration](#4-claude-desktop-configuration)
+  - [5. Cursor Configuration](#5-cursor-configuration)
+  - [6. Hermes & Custom CLI Agents](#6-hermes--custom-cli-agents)
+- [How Context & Project Memory Work via MCP](#how-context--project-memory-work-via-mcp)
+  - [Automatic Context Ingestion](#automatic-context-ingestion)
+  - [Explicit Context & Memory Tools](#explicit-context--memory-tools)
+  - [How Context is Surfaced in the Web UI](#how-context-is-surfaced-in-the-web-ui)
+- [MCP Tools Reference (20 Tools)](#mcp-tools-reference-20-tools)
+- [MCP Troubleshooting & FAQ](#mcp-troubleshooting--faq)
 - [Running Tests](#running-tests)
 - [Architecture & Security Invariants](#architecture--security-invariants)
 
@@ -317,13 +328,82 @@ node scripts/stage5c-demo.mjs
 
 ---
 
-## Connecting External MCP Clients (Cursor, Claude Desktop, OpenCode)
+## Configuring & Using External MCP Clients (OpenCode, Claude Desktop, Cursor, Hermes)
 
-You can add GridMind's MCP server to any MCP-compliant client.
+GridMind exposes its complete agent coordination plane via a standalone **Model Context Protocol (MCP)** server over standard input/output (`stdio`). This allows external coding agents like **OpenCode**, **Claude Desktop**, **Cursor**, and custom CLI agents (e.g., **Hermes**) to seamlessly participate in GridMind projects.
 
-### Claude Desktop Configuration
+### 1. Build the MCP Server
 
-Add the following to your `claude_desktop_config.json`:
+Before connecting any client, build the standalone MCP bundle:
+
+```bash
+npm run build:mcp
+```
+
+This compiles `src/mcp/cli.ts` into a self-contained Node.js ESM executable at `dist/mcp/cli.mjs`.
+
+### 2. Understanding Authentication Tokens (Master vs. Worker)
+
+Every MCP interaction requires an authentication token passed via the `GRIDMIND_TOKEN` environment variable.
+
+| Token Type | Purpose | Capabilities | How to Obtain |
+|---|---|---|---|
+| **Worker Token** | Assigned to an agent working on a specific task | Sandboxed to that task's Git worktree; records memories and emits handoffs for that task. | Generated automatically when an agent session is launched for a task in the UI, or found in `.gridmind/gridmind.db`. |
+| **Master Token** | Used by project leads, orchestrator agents, or interactive IDE agents (like OpenCode/Cursor) | Cross-task visibility, ability to set persistent project context (`gridmind_set_context`), view all diffs, create PRs, and inspect all tasks. | Generated when creating a master session, or retrieved from SQLite: `sqlite3 .gridmind/gridmind.db "SELECT token, role, project_id FROM sessions WHERE role='master';"` |
+
+#### Required Environment Variables
+- `GRIDMIND_API`: The URL of your running GridMind server (typically `http://localhost:3000`).
+- `GRIDMIND_TOKEN`: The bearer session token for authentication.
+
+---
+
+### 3. OpenCode Configuration (`opencode.jsonc`)
+
+[OpenCode](https://opencode.ai) supports MCP servers defined in either your global or project-level configuration.
+
+#### Option A: Global Configuration (Recommended)
+Edit or create `~/.config/opencode/opencode.jsonc`:
+
+```jsonc
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcpServers": {
+    "gridmind": {
+      "command": "node",
+      "args": ["/Users/krishna/Codespace/Agentmind/dist/mcp/cli.mjs"],
+      "env": {
+        "GRIDMIND_API": "http://localhost:3000",
+        "GRIDMIND_TOKEN": "<YOUR_SESSION_TOKEN>"
+      }
+    }
+  }
+}
+```
+*(Replace `/Users/krishna/Codespace/Agentmind/dist/mcp/cli.mjs` with the absolute path to your GridMind installation).*
+
+#### Option B: Project-Level Configuration
+Create `.opencode/opencode.jsonc` in the root of the repository you are working on with OpenCode, using the same JSON snippet as above.
+
+#### Verifying OpenCode Connection
+1. Launch OpenCode in your target repository:
+   ```bash
+   opencode
+   ```
+2. OpenCode will automatically load the `gridmind` tools.
+3. Test by prompting OpenCode:
+   > *"Use the gridmind_get_context tool to check the project context and any recent memories."*
+4. OpenCode can update context or save facts:
+   > *"Set a project context key 'backend_framework' with value 'Next.js 15 API Routes' using gridmind_set_context."*
+
+---
+
+### 4. Claude Desktop Configuration
+
+Add GridMind to your `claude_desktop_config.json`:
+
+- **macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
+- **Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
+- **Linux**: `~/.config/Claude/claude_desktop_config.json`
 
 ```json
 {
@@ -340,56 +420,180 @@ Add the following to your `claude_desktop_config.json`:
 }
 ```
 
-### Cursor Configuration
-
-In Cursor Settings → **Features** → **MCP Servers** → **Add New MCP Server**:
-- **Name**: `gridmind`
-- **Type**: `command`
-- **Command**: `node /absolute/path/to/GridMind/dist/mcp/cli.mjs`
-- **Environment Variables**:
-  - `GRIDMIND_API`: `http://localhost:3000`
-  - `GRIDMIND_TOKEN`: `<YOUR_SESSION_TOKEN>`
+Restart Claude Desktop. The hammer icon will show all 20 GridMind tools available for Claude.
 
 ---
 
-## MCP Tools Reference
+### 5. Cursor Configuration
 
-GridMind provides **19 MCP tools** grouped into clean functional domains:
+In Cursor:
+1. Open **Cursor Settings** (`Cmd + ,` or `Ctrl + ,`).
+2. Navigate to **Features** → **MCP Servers**.
+3. Click **"+ Add New MCP Server"**.
+4. Configure:
+   - **Name**: `gridmind`
+   - **Type**: `command`
+   - **Command**: `node /absolute/path/to/GridMind/dist/mcp/cli.mjs`
+   - **Environment Variables**:
+     - `GRIDMIND_API`: `http://localhost:3000`
+     - `GRIDMIND_TOKEN`: `<YOUR_SESSION_TOKEN>`
 
-### 1. Git Tools (Worktree Scoped)
-| Tool | Description |
-|---|---|
-| `gridmind_git_status` | Returns clean/dirty state, branch, changed files, untracked files, ahead/behind count for the authenticated task's worktree. |
-| `gridmind_git_diff` | Returns bounded diff (unstaged, staged, or against a commit SHA). Rejects path traversal (`../`). |
-| `gridmind_git_commit` | Commits changes in the authenticated worktree. Returns commit SHA and updates task record. |
-| `gridmind_git_branches` | Lists branches in the project repository (bounded to 50). |
-| `gridmind_git_log` | Returns recent bounded commits (default 10, max 50) with commit lookup. |
+Alternatively, configure `.cursor/mcp.json` in your workspace:
 
-### 2. GitHub Tools
-| Tool | Description |
-|---|---|
-| `gridmind_github_issues` | Lists open issues for the project-configured GitHub repository. |
-| `gridmind_github_create_pr` | Creates a Pull Request using the project-configured repository. Validates head/base branches. |
-| `gridmind_github_issue_to_task` | Converts a GitHub issue into a GridMind task with project isolation. |
+```json
+{
+  "mcpServers": {
+    "gridmind": {
+      "command": "node",
+      "args": ["/absolute/path/to/GridMind/dist/mcp/cli.mjs"],
+      "env": {
+        "GRIDMIND_API": "http://localhost:3000",
+        "GRIDMIND_TOKEN": "<YOUR_SESSION_TOKEN>"
+      }
+    }
+  }
+}
+```
+
+---
+
+### 6. Hermes & Custom CLI Agents
+
+To run standalone AI agent workers or CLI models through MCP over `stdio`:
+
+```bash
+GRIDMIND_API="http://localhost:3000" \
+GRIDMIND_TOKEN="<YOUR_SESSION_TOKEN>" \
+node dist/mcp/cli.mjs
+```
+
+---
+
+## How Context & Project Memory Work via MCP
+
+GridMind distinguishes between **persistent structured context** (high-level key-values), **learned project memory** (facts, constraints, decisions), and **worktree Git state**.
+
+```
+┌────────────────────────────────────────────────────────────────────────┐
+│                        GridMind Web Dashboard                          │
+│                                                                        │
+│  [ PROJECT CONTEXT ]                          [ PROJECT MEMORY ]       │
+│  architecture_pattern: Next.js + SQLite       ★ [fact] Git commit 4fd..│
+│  latest_commit: 4fdbe9e — feat(...)           ★ [fact] Task completed  │
+│  auth_method: Bearer JWT                      ★ [constraint] No API key│
+└───────────────────▲────────────────────────────────────────▲───────────┘
+                    │                                        │
+           gridmind_set_context                    gridmind_record_memory
+           (or auto-commit update)                 (or auto-commit/status)
+                    │                                        │
+                    └──────────────────┬─────────────────────┘
+                                       │
+                              OpenCode / Cursor / MCP
+```
+
+### Automatic Context Ingestion
+You don't need to manually document every action. GridMind automatically records context for you:
+1. **On Git Commit (`gridmind_git_commit`)**:
+   - Automatically logs a shared memory fact: `Git commit <sha> on <branch>: "<message>"`.
+   - Automatically writes or updates the `latest_commit` key in the project context table.
+2. **On Task Completion (`gridmind_update_task_status(status="done")`)**:
+   - Automatically logs a completion fact linked to that task with the commit SHA into project memory.
+
+### Explicit Context & Memory Tools
+Agents can proactively store knowledge to assist other agents in the swarm:
+- **`gridmind_set_context(key, value)`**:
+  - Saves persistent project metadata (e.g., `tech_stack`, `api_conventions`, `testing_strategy`).
+  - Instantly visible in the left column of the **Context** tab on the web UI.
+- **`gridmind_record_memory(content, type, importance)`**:
+  - Records granular insights (`fact`, `constraint`, `decision`) with importance `1` to `3`.
+  - Stored in the project memory store and retrieved by other agents via `gridmind_get_context` or `gridmind_search_memory`.
+- **`gridmind_record_decision(summary, rationale)`**:
+  - Records formal architectural trade-offs in the project decisions log.
+
+### How Context is Surfaced in the Web UI
+When you open a project at `http://localhost:3000/projects/<project_id>` and switch to the **Context** tab:
+1. **Left Panel: "Project Context & Decisions"**:
+   - Shows all active key-value pairs (with inline add/remove buttons and a one-click **"Copy Brief"** button).
+   - Shows architectural decisions with filtering by status (`proposed`, `accepted`, `superseded`).
+2. **Right Panel: "Project Memory & Learned Context"**:
+   - Shows the live chronological stream of all commits, task events, constraints, and agent handoffs.
+   - Each entry highlights its type, importance badge (★), author session, and relative timestamp.
+
+---
+
+## MCP Tools Reference (20 Tools)
+
+GridMind provides **20 MCP tools** organized into clear functional domains:
+
+### 1. Context & Memory Tools
+| Tool | Parameters | Description |
+|---|---|---|
+| `gridmind_set_context` | `key`, `value` | Persist or update a project-level context key-value entry (e.g. `architecture`, `conventions`). Visible immediately in the web UI. |
+| `gridmind_get_context` | `taskId?` | Retrieves token-budgeted project brief, task details, and incoming handoffs for prompt priming. |
+| `gridmind_get_session_context` | _none_ | Inspects current agent session, task assignment, and role. |
+| `gridmind_record_memory` | `content`, `type`, `importance?`, `scope?` | Records knowledge (`fact`, `constraint`, `decision`) into project or task memory. |
+| `gridmind_search_memory` | `query`, `type?`, `scope?` | Searches project-shared and task-scoped memories using semantic text search. |
+| `gridmind_record_decision` | `summary`, `rationale`, `status?` | Records an architectural decision in the project decision log. |
+| `gridmind_get_task` | `taskId?` | Inspects the assigned task details, status, and branch. |
+| `gridmind_update_task_status` | `status`, `notes?` | Updates task status (`in_progress`, `blocked`, `done`, `failed`). Auto-records memory on completion. |
+| `gridmind_emit_event` | `event`, `data?` | Emits custom project events to the live SSE stream. |
+
+### 2. Git Tools (Worktree Scoped)
+| Tool | Parameters | Description |
+|---|---|---|
+| `gridmind_git_status` | `taskId?` | Returns clean/dirty status, branch, changed files, untracked files, and ahead/behind count for the authenticated task's worktree. |
+| `gridmind_git_diff` | `path?`, `staged?`, `commit?`, `taskId?` | Returns bounded diff (unstaged, staged, or against a commit SHA). Strictly rejects path traversal (`../`). |
+| `gridmind_git_commit` | `message`, `taskId?` | Commits changes in the authenticated worktree. Updates task record and auto-records commit to memory and context. |
+| `gridmind_git_branches` | _none_ | Lists branches in the project repository (bounded to 50). |
+| `gridmind_git_log` | `limit?`, `commit?` | Returns recent bounded commits (default 10, max 50) with commit lookup. |
 
 ### 3. Handoff Tools
-| Tool | Description |
-|---|---|
-| `gridmind_create_handoff` | Creates a structured handoff (completed work, changed files, decisions, blockers, next steps, commit SHA, branch). |
-| `gridmind_get_handoffs` | Retrieves handoffs targeted at or created by the agent's task. |
-| `gridmind_accept_handoff` | Accepts an incoming handoff idempotently. |
+| Tool | Parameters | Description |
+|---|---|---|
+| `gridmind_create_handoff` | `target_task_id`, `summary`, `completed_work`, `changed_files`, `decisions`, `blockers`, `next_steps`, `commit_sha`, `branch` | Creates a structured handoff transferring state from one agent/task to another. |
+| `gridmind_get_handoffs` | `taskId?` | Retrieves handoffs targeted at or created by the agent's task. |
+| `gridmind_accept_handoff` | `handoff_id` | Accepts an incoming handoff idempotently. |
 
-### 4. Memory & Context Tools
-| Tool | Description |
-|---|---|
-| `gridmind_get_session_context` | Inspects current agent session, task assignment, and role. |
-| `gridmind_get_context` | Retrieves project context brief, task details, and incoming handoffs within a strict token budget. |
-| `gridmind_search_memory` | Searches project-shared and task-scoped memories. |
-| `gridmind_record_memory` | Records memory (`project_shared`, `task_scoped`, or `agent_private`). |
-| `gridmind_get_task` | Inspects the assigned task details. |
-| `gridmind_update_task_status` | Updates task status (`in_progress`, `blocked`, `done`, `failed`). |
-| `gridmind_record_decision` | Records an architectural decision in the project log. |
-| `gridmind_emit_event` | Emits custom project events to the live SSE stream. |
+### 4. GitHub Tools
+| Tool | Parameters | Description |
+|---|---|---|
+| `gridmind_github_issues` | `state?` | Lists open issues for the project-configured GitHub repository. |
+| `gridmind_github_create_pr` | `title`, `body`, `head_branch`, `base_branch` | Creates a Pull Request using the project-configured repository. |
+| `gridmind_github_issue_to_task` | `issue_number`, `priority?` | Converts a GitHub issue into a GridMind task with worktree isolation. |
+
+---
+
+## MCP Troubleshooting & FAQ
+
+### Q: Why am I not seeing context changes in the web UI when using OpenCode?
+1. **Check which tab you are looking at**: Open `http://localhost:3000/projects/<your_project_id>` and make sure you click the **Context** tab in the navigation bar.
+2. **Key-Value vs Memory**:
+   - If you used `gridmind_set_context`, it appears in the **left column** under **"Project Context"**.
+   - If you committed via `gridmind_git_commit` or used `gridmind_record_memory`, it appears in the **right column** under **"Project Memory & Learned Context"**.
+3. **Verify Project ID**: Ensure the session token in your `opencode.jsonc` belongs to the project you are viewing in the browser. You can verify sessions with:
+   ```bash
+   sqlite3 .gridmind/gridmind.db "SELECT id, project_id, role, agent_type, token FROM sessions ORDER BY created_at DESC LIMIT 5;"
+   ```
+
+### Q: OpenCode reports `401 Unauthorized: invalid token`
+Your session token may have expired or may not match any active session in `.gridmind/gridmind.db`. Generate or retrieve a fresh token:
+```bash
+sqlite3 .gridmind/gridmind.db "SELECT token, role, project_id FROM sessions WHERE role='master' ORDER BY created_at DESC LIMIT 1;"
+```
+Update `GRIDMIND_TOKEN` in `~/.config/opencode/opencode.jsonc` and restart OpenCode.
+
+### Q: OpenCode reports `connection refused` on MCP calls
+The GridMind Next.js web application must be running to handle MCP API calls. Start it with:
+```bash
+npm run dev
+```
+Make sure `GRIDMIND_API` is set to `http://localhost:3000`.
+
+### Q: Do I need to rebuild the MCP server after editing GridMind source code?
+Yes! If you modify any files in `src/mcp/`, rebuild the standalone executable with:
+```bash
+npm run build:mcp
+```
 
 ---
 

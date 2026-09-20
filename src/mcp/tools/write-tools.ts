@@ -46,6 +46,35 @@ export function registerWriteTools(server: McpServer, client: GridMindClient) {
     }
   );
 
+  // 4b. gridmind_set_context
+  server.tool(
+    "gridmind_set_context",
+    "Set a project context key-value entry (e.g. key='stack', value='Next.js 15 + TypeScript'). Directly visible in the GridMind Project Context dashboard.",
+    {
+      key: z.string().min(1).describe("Context key (e.g. stack, conventions, architecture)"),
+      value: z.string().describe("Context value content"),
+    },
+    async ({ key, value }) => {
+      try {
+        const result = await client.setContext({ key, value });
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(result, null, 2),
+            },
+          ],
+        };
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        return {
+          isError: true,
+          content: [{ type: "text", text: `Failed to set context: ${message}` }],
+        };
+      }
+    }
+  );
+
   // 6. gridmind_update_task_status
   server.tool(
     "gridmind_update_task_status",

@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
 import { authenticateAgent } from "@/lib/internal-auth";
-import { getTask, updateTask, getProject } from "@/lib/db";
+import { getTask, updateTask, getProject, createMemory } from "@/lib/db";
 import { validateTaskTransition } from "@/lib/task-transitions";
 import { publish } from "@/lib/events";
+import { nanoid } from "nanoid";
 
 export const runtime = "nodejs";
 
@@ -78,6 +79,24 @@ export async function POST(
     agent: session.agent_type,
     sessionId: session.id,
   });
+
+  // Auto-record task completion to project memory
+  if (updated.status === "done") {
+    try {
+      createMemory(session.project_id, {
+        id: nanoid(),
+        scope: "project_shared",
+        type: "fact",
+        content: `Task completed: "${updated.title}"${updated.latest_commit ? ` (Commit: ${updated.latest_commit.slice(0, 7)})` : ""}`,
+        importance: 2,
+        source: "task",
+        session_id: session.id,
+        task_id: updated.id,
+      });
+    } catch {
+      /* ignore */
+    }
+  }
 
   return NextResponse.json({ task: updated });
 }

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getProject, listContext, setContext, deleteContext, buildContextBrief } from "@/lib/db";
+import { getProject, listContext, setContext, deleteContext, buildContextBrief, listMemories } from "@/lib/db";
 import { publish } from "@/lib/events";
 
 export const runtime = "nodejs";
@@ -11,7 +11,11 @@ export async function GET(
   const { id } = await params;
   const project = getProject(id);
   if (!project) return NextResponse.json({ error: "not found" }, { status: 404 });
-  return NextResponse.json({ context: listContext(id), brief: buildContextBrief(id) });
+  return NextResponse.json({
+    context: listContext(id),
+    brief: buildContextBrief(id),
+    memories: listMemories(id, { includeArchived: false }),
+  });
 }
 
 export async function POST(

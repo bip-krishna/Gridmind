@@ -11,7 +11,7 @@ export class GitError extends Error {
   }
 }
 
-async function runGit(cwd: string, args: string[], options?: { allowFail?: boolean }): Promise<string> {
+export async function runGit(cwd: string, args: string[], options?: { allowFail?: boolean }): Promise<string> {
   const cmd = `git ${args.map((a) => `'${a.replace(/'/g, "'\\''")}'`).join(" ")}`;
   try {
     const { stdout } = await execAsync(cmd, { cwd, maxBuffer: 64 * 1024 * 1024, encoding: "utf8" });

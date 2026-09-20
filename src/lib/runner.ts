@@ -8,6 +8,7 @@ import {
   updateSession,
   getTask,
   updateTask,
+  createMemory,
   type Session,
 } from "./db";
 import { getAdapter, newId, type AgentMessage, type AgentType } from "./agents";
@@ -397,6 +398,26 @@ function finishSession(
           worktreePath: freshTask.worktree_path,
           branch: freshTask.worktree_branch,
         });
+      }
+
+      // Auto-record task completion to project memory
+      if (finalTaskStatus === "done") {
+        try {
+          if (freshTask) {
+            createMemory(session.project_id, {
+              id: nanoid(),
+              scope: "project_shared",
+              type: "fact",
+              content: `Task completed: "${freshTask.title}"${freshTask.latest_commit ? ` (Commit: ${freshTask.latest_commit.slice(0, 7)})` : ""}`,
+              importance: 2,
+              source: "task",
+              session_id: session.id,
+              task_id: taskId,
+            });
+          }
+        } catch {
+          /* ignore */
+        }
       }
     }
   }

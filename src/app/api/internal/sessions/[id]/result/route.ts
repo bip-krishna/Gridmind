@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { authenticateAgent } from "@/lib/internal-auth";
-import { updateSession } from "@/lib/db";
+import { updateSession, createMemory, createDecision } from "@/lib/db";
+import { nanoid } from "nanoid";
 
 export const runtime = "nodejs";
 
@@ -44,6 +45,51 @@ export async function POST(
   const updated = updateSession(auth.session.project_id, sessionId, patch as Record<string, string | null>);
   if (!updated) {
     return NextResponse.json({ error: "session not found" }, { status: 404 });
+  }
+
+  // Auto-record summary to project memory
+  if (body.summary && typeof body.summary === "string" && body.summary.trim()) {
+    try {
+      createMemory(auth.session.project_id, {
+        id: nanoid(),
+        scope: "project_shared",
+        type: "fact",
+        content: `Agent Result (${auth.session.agent_type}): ${body.summary.trim()}`,
+        importance: 2,
+        source: "agent",
+        session_id: auth.session.id,
+        task_id: auth.session.task_id ?? null,
+      });
+    } catch {
+      /* ignore */
+    }
+  }
+
+  // Auto-record decisions to project decisions table and memory
+  if (Array.isArray(body.decisions)) {
+    for (const d of body.decisions) {
+      if (typeof d === "string" && d.trim()) {
+        try {
+          createDecision(auth.session.project_id, {
+            id: nanoid(),
+            title: d.trim(),
+            body: `Decision recorded from agent session ${auth.session.id}`,
+          });
+          createMemory(auth.session.project_id, {
+            id: nanoid(),
+            scope: "project_shared",
+            type: "constraint",
+            content: `Architectural Decision: ${d.trim()}`,
+            importance: 3,
+            source: "decision",
+            session_id: auth.session.id,
+            task_id: auth.session.task_id ?? null,
+          });
+        } catch {
+          /* ignore */
+        }
+      }
+    }
   }
 
   return NextResponse.json({

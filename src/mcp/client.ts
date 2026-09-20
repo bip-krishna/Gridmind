@@ -196,6 +196,16 @@ export class GridMindClient {
   }
 
   /**
+   * Set a project context key-value entry (directly visible on dashboard).
+   */
+  async setContext(input: { key: string; value: string }) {
+    return this.request<{ ok: boolean; key: string }>("POST", "/api/internal/context", {
+      key: input.key,
+      value: input.value,
+    });
+  }
+
+  /**
    * 5. Get assigned or specified task details.
    */
   async getTask(taskId?: string) {

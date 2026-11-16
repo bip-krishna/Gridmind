@@ -17,12 +17,24 @@ const globalForDb = globalThis as unknown as { __gridmindDb?: Database.Database 
 
 function createDb(): Database.Database {
   ensureDataDir();
-  const db = new Database(path.join(DATA_DIR, "gridmind.db"));
-  db.pragma("journal_mode = WAL");
-  db.pragma("foreign_keys = ON");
+  const db = new Database(path.join(DATA_DIR, "gridmind.db"), { timeout: 1000 });
   try {
-    db.transaction(() => migrate(db))();
-    return db;
+    // Multiple MCP clients may open a brand-new store at the same time. Reserve
+    // the migration write lock before reading schema, avoiding BUSY_SNAPSHOT.
+    const deadline = Date.now() + 5000;
+    for (;;) {
+      try {
+        db.pragma("journal_mode = WAL");
+        db.pragma("foreign_keys = ON");
+        db.transaction(() => migrate(db)).immediate();
+        db.pragma("busy_timeout = 5000");
+        return db;
+      } catch (error) {
+        const code = error && typeof error === "object" && "code" in error ? String(error.code) : "";
+        if (!code.startsWith("SQLITE_BUSY") || Date.now() >= deadline) throw error;
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25);
+      }
+    }
   } catch (error) {
     db.close();
     throw error;

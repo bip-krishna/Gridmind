@@ -5,6 +5,52 @@
 
 ---
 
+## Simple project memory (CLI and desktop coding clients)
+
+Install once from this checkout (Node 22+, with Node 26 pinned in `.nvmrc`):
+
+```bash
+npm install --global /absolute/path/to/Gridmind
+```
+
+Then, inside any project, run:
+
+```bash
+gridmind init
+```
+
+That is the per-project setup. No agent selection, dashboard server, API address, or copied session token is required. The standalone memory server is bundled, so a Next.js/dashboard build is unnecessary. Where npm allows lifecycle scripts, the prepare step refreshes that bundle; otherwise the shipped bundle remains usable. This repository is still a private local package, so a public `npx gridmind` install is **not published or verified**. Keep the source installation in place when using npm's local-directory global link.
+
+`init` configures the supported clients for this folder, even if you install a client later:
+
+| Client | Project configuration |
+|---|---|
+| Codex local CLI / compatible local app and IDE sessions | `.codex/config.toml` |
+| Claude Code | `.mcp.json` |
+| Cursor | `.cursor/mcp.json` |
+| OpenCode V1 or V2 | Existing `opencode.json`/`.jsonc`, otherwise `opencode.jsonc` |
+
+Codex loads project configuration only for trusted projects. Clients may require a restart/new session and their own trust/MCP approval; Gridmind does not bypass those prompts. These files follow the [Codex MCP docs](https://developers.openai.com/codex/mcp), [Claude Code project MCP docs](https://code.claude.com/docs/en/mcp), [Cursor MCP docs](https://cursor.com/docs/context/mcp), and [OpenCode docs](https://opencode.ai/docs/mcp-servers). Generated configurations use absolute local paths; run setup on each machine instead of committing another machine's paths.
+
+Setup preserves other configuration and JSONC comments, backs up changed existing files under `.gridmind/backups/`, and reports malformed, conflicting or symlinked configuration without overwriting it. It adds a managed memory-workflow section to `AGENTS.md`, `CLAUDE.md` and an always-applied Cursor rule. This encourages reads at task start and concise writes at milestones; actual tool use remains best-effort and depends on the client. It does not capture private chats automatically.
+
+Each client starts a small stdio MCP process on demand. Processes in the same project share `.gridmind/gridmind.db`, including project key-values and decisions. Clients identify themselves through MCP initialization and receive separate sessions, so shared memory is visible across clients and private notes remain connection-specific. The standalone mode exposes seven memory tools and the `gridmind://project/context` resource; task orchestration/Git/GitHub tools remain part of the existing dashboard bridge.
+
+Useful commands:
+
+```bash
+gridmind doctor           # installed/configured clients; not a claim of connection
+gridmind connections      # recent self-reported connections and last-known status
+gridmind init --dry-run   # inspect proposed project changes without writing them
+gridmind mcp              # generic stdio entry point for another MCP client
+```
+
+Git subfolders resolve to the repository root. Linked worktrees use the main checkout's memory store; run `gridmind init` once in each worktree to install its client settings. Different project folders have separate stores. Hard-killed clients can retain a stale last-known connection status; the list is not an OS process monitor.
+
+The original dashboard mode below keeps its own configured data directory. Existing dashboard memories are not silently moved into a new folder's local store. To inspect a local store in the dashboard, launch the dashboard with `GRIDMIND_DATA_DIR` set to that project's `.gridmind` directory. Browser-only/cloud apps that cannot launch local stdio MCP need a separate remote integration; opening the folder alone cannot connect an unsupported app.
+
+Local verification: `npm test` runs the 14 existing regression tests plus 11 new project-memory tests. The new suite tests configuration preservation/idempotence, worktrees, client registration, concurrent SQLite startup, cross-client reads/writes, restarts, and project/private-note isolation using real MCP fixture processes. It does not launch paid models or verify every desktop app's UI.
+
 ## Overview
 
 **GridMind** is a complete coordination and control plane designed specifically for multi-agent software engineering. Instead of running AI coding assistants as isolated chat toys or allowing multiple agents to trample over a single Git working directory, GridMind bridges human developers and autonomous AI coding agents (OpenCode, Codex, Claude Code, Cursor, and Hermes) into a structured, production-ready engineering lifecycle.
@@ -320,7 +366,7 @@ node scripts/stage5c-demo.mjs
 ---
 
 
-## Sharing memory between agents
+## Sharing memory through the original dashboard bridge
 
 Run one GridMind server for all clients. Each client needs a session token for the **same project ID** and the same `GRIDMIND_API` address. A separate server installation normally has a separate database. Ordinary chat messages and direct shell Git commits are not captured automatically.
 
@@ -376,6 +422,8 @@ Run the unit regressions and isolated integration harness. The harness creates i
 
 ```bash
 npm test
+npm run build:memory
+npm run test:project
 npm run typecheck
 npm run lint
 npm run build
@@ -383,6 +431,8 @@ npm run test:integration
 ```
 
 Do not run the older individual integration scripts against a server containing your own projects. They create/delete fixture repositories. `npm run test:integration` runs all eleven documented suites against a disposable server, with no GitHub credentials and no paid agent execution. These checks validate the bridge and API; they do not validate real model behavior or live GitHub operations.
+
+Verified on macOS with Node 26: 14 regression tests and all 11 integration suites (674 reported assertions) pass. TypeScript, the offline production build, and MCP bundling pass. ESLint reports no errors and 14 existing unused-variable warnings in older tests. Browser checks verify context save/reload and failed-save draft preservation with retry.
 
 ### Static Checks & Linting
 ```bash

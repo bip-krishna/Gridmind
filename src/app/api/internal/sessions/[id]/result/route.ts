@@ -1,6 +1,7 @@
+import { captureMemory } from "@/lib/memory-capture";
 import { NextResponse } from "next/server";
 import { authenticateAgent } from "@/lib/internal-auth";
-import { updateSession, createMemory, createDecision } from "@/lib/db";
+import { updateSession, createDecision } from "@/lib/db";
 import { nanoid } from "nanoid";
 
 export const runtime = "nodejs";
@@ -47,11 +48,12 @@ export async function POST(
     return NextResponse.json({ error: "session not found" }, { status: 404 });
   }
 
+  let memoryCapture = { captured: true, pending: 0 };
+
   // Auto-record summary to project memory
   if (body.summary && typeof body.summary === "string" && body.summary.trim()) {
     try {
-      createMemory(auth.session.project_id, {
-        id: nanoid(),
+      memoryCapture = captureMemory(auth.session.project_id, {
         scope: "project_shared",
         type: "fact",
         content: `Agent Result (${auth.session.agent_type}): ${body.summary.trim()}`,
@@ -61,7 +63,7 @@ export async function POST(
         task_id: auth.session.task_id ?? null,
       });
     } catch {
-      /* ignore */
+      return NextResponse.json({ error: "Action saved, but memory capture failed. Save the summary with record_memory." }, { status: 500 });
     }
   }
 
@@ -75,24 +77,16 @@ export async function POST(
             title: d.trim(),
             body: `Decision recorded from agent session ${auth.session.id}`,
           });
-          createMemory(auth.session.project_id, {
-            id: nanoid(),
-            scope: "project_shared",
-            type: "constraint",
-            content: `Architectural Decision: ${d.trim()}`,
-            importance: 3,
-            source: "decision",
-            session_id: auth.session.id,
-            task_id: auth.session.task_id ?? null,
-          });
+
         } catch {
-          /* ignore */
+          return NextResponse.json({ error: "Action saved, but memory capture failed. Save the summary with record_memory." }, { status: 500 });
         }
       }
     }
   }
 
   return NextResponse.json({
+    memory_capture: memoryCapture,
     session: {
       id: updated.id,
       result_summary: updated.result_summary,

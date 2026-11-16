@@ -23,7 +23,7 @@ A standalone **Model Context Protocol (MCP)** server (`dist/mcp/cli.mjs`) operat
 * **20 Specialized MCP Tools**: Equips any MCP-compatible agent (OpenCode, Claude Desktop, Cursor, Hermes) with tools for Git operations, GitHub PRs/issues, memory search, context synchronization, and structured handoffs.
 * **Strict Worktree Sandboxing**: Ensures each agent executes strictly inside its task-specific Git worktree on an isolated branch, completely preventing file collisions.
 * **Structured Agent-to-Agent Handoffs**: Formally transfers state between agents using commit SHA references, modified file manifests, decisions, blockers, and next steps.
-* **Automated Context Ingestion**: Automatically records every commit and task status update into SQLite, keeping the entire agent swarm synchronized.
+* **Automated Context Ingestion**: Automatically captures commits made through `gridmind_git_commit`, task completions, and submitted structured results in SQLite, keeping the entire agent swarm synchronized.
 
 ---
 
@@ -98,7 +98,7 @@ GridMind provides a unified infrastructure plane combining a **developer control
 * **20 Native Model Context Protocol Tools**: Comprehensive tool suite spanning Git operations, GitHub integration, structured handoffs, memory management, and task status.
 * **Isolated Git Worktree Sandboxing**: Automated provisioning of sandboxed directories (`.gridmind-worktrees/<project>/<task>`) on dedicated branches (`gridmind/<task>/1`), preventing file collisions.
 * **Structured Handoff Pipeline**: First-class handoff primitives (`create_handoff`, `get_handoffs`, `accept_handoff`) containing commit SHA references, changed files, decisions, blockers, and next steps.
-* **Automatic Context & Memory Ingestion**: Every agent commit and task completion is automatically indexed into SQLite with WAL mode and surfaced on both the Web UI and MCP context tools.
+* **Automatic Context & Memory Ingestion**: Commits made through GridMind MCP and agent task completions are automatically indexed into SQLite with WAL mode and surfaced on both the Web UI and MCP context tools.
 * **Universal Agent Compatibility**: Works out of the box with OpenCode, Claude Desktop, Cursor, and custom CLI agents (Hermes, Codex).
 * **Enterprise Security Invariants**: Worker tokens are strictly bound to their task worktree; path traversal (`../`) is rejected; diff outputs are bounded to 30,000 characters; and zero credentials or private tokens are leaked.
 
@@ -112,7 +112,7 @@ GridMind provides a unified infrastructure plane combining a **developer control
 * **Agent Integration & Protocols:** Model Context Protocol (`@modelcontextprotocol/sdk`), GitHub REST API (`@octokit/rest`).
 * **MCP Server Binary:** Standalone Node.js bundle compiled via `esbuild` to `dist/mcp/cli.mjs`.
 * **Validation & Security:** `zod` schema validation, cryptographic `nanoid` identifiers, canonical path verification.
-* **Hosting / Deployment:** Node.js 18+ / 20+ runtime (macOS / Linux / Windows).
+* **Hosting / Deployment:** Node.js 22+ runtime (macOS / Linux / Windows).
 
 ---
 
@@ -175,7 +175,7 @@ During the design, development, and testing of GridMind, AI tools—including **
 ## How to Run Locally
 
 ### Prerequisites
-- **Node.js**: Version `18.0.0` or higher (`v20+` recommended). Check with `node -v`.
+- **Node.js**: Version **22 or higher**. `.nvmrc` pins Node 26; run `nvm use` before installation. The locked SQLite dependency does not support Node 18/20.
 - **npm**: Version `9.0.0` or higher. Check with `npm -v`.
 - **Git**: Version `2.20+` (must support `git worktree`). Check with `git --version`.
 
@@ -189,7 +189,7 @@ git clone https://github.com/bip-krishna/Gridmind.git
 cd Gridmind
 
 # Install dependencies
-npm install
+npm ci
 ```
 
 ---
@@ -239,29 +239,34 @@ Open your browser to:
 ### Step 5: Connecting External MCP Clients (Part 2)
 
 #### 1. Retrieve an Active Token
-In a separate terminal, retrieve an active master token from GridMind's SQLite database:
+First launch a master session in the dashboard's Agents panel. This requires an installed/configured agent CLI. Merely configuring Agent Setup does not create a session token. In a separate local terminal, retrieve that project's token; do not share it or commit it:
 ```bash
-sqlite3 .gridmind/gridmind.db "SELECT token, role, project_id FROM sessions WHERE role='master' ORDER BY created_at DESC LIMIT 1;"
+sqlite3 -readonly .gridmind/gridmind.db "SELECT token, role, project_id FROM sessions WHERE project_id='<YOUR_PROJECT_ID>' AND role='master' ORDER BY created_at DESC LIMIT 1;"
 ```
 
-#### 2. OpenCode Configuration (`~/.config/opencode/opencode.jsonc`)
-Add GridMind to your OpenCode configuration:
-```jsonc
+#### 2. OpenCode V2 configuration (`~/.config/opencode/opencode.jsonc`)
+
+Set `GRIDMIND_TOKEN` in the environment that launches OpenCode, then add:
+
+```json
 {
   "$schema": "https://opencode.ai/config.json",
-  "mcpServers": {
-    "gridmind": {
-      "command": "node",
-      "args": ["/Users/krishna/Codespace/Agentmind/dist/mcp/cli.mjs"],
-      "env": {
-        "GRIDMIND_API": "http://localhost:3000",
-        "GRIDMIND_TOKEN": "<YOUR_SESSION_TOKEN_FROM_STEP_1>"
+  "mcp": {
+    "servers": {
+      "gridmind": {
+        "type": "local",
+        "command": ["node", "/absolute/path/to/Gridmind/dist/mcp/cli.mjs"],
+        "environment": {
+          "GRIDMIND_API": "http://127.0.0.1:3000",
+          "GRIDMIND_TOKEN": "{env:GRIDMIND_TOKEN}"
+        }
       }
     }
   }
 }
 ```
-*(Replace the path to `dist/mcp/cli.mjs` with your absolute installation path).*
+
+For OpenCode V1, place `gridmind` directly under `mcp` instead of `mcp.servers`. The `mcpServers` format below is for Claude Desktop and Cursor, not OpenCode. See the [official OpenCode MCP documentation](https://opencode.ai/docs/mcp-servers).
 
 #### 3. Launch OpenCode
 ```bash
@@ -314,6 +319,28 @@ node scripts/stage5c-demo.mjs
 
 ---
 
+
+## Sharing memory between agents
+
+Run one GridMind server for all clients. Each client needs a session token for the **same project ID** and the same `GRIDMIND_API` address. A separate server installation normally has a separate database. Ordinary chat messages and direct shell Git commits are not captured automatically.
+
+1. At session start, call `gridmind_get_session_context`, then `gridmind_get_context`.
+2. Before a task, call `gridmind_search_memory` with relevant keywords. `category` accepts a memory type or scope; `limit` is an estimated token budget, not a record count.
+3. Save reusable findings explicitly with `gridmind_record_memory`:
+
+   ```json
+   {"scope":"project_shared","category":"constraint","content":"Preserve existing memory rows during schema upgrades.","importance":3}
+   ```
+
+4. A second session in the same project should find that statement with `gridmind_search_memory`. Use `project_shared` for knowledge needed by other agents. `agent_private` belongs only to the creating session; `task` belongs to the authorized task.
+5. Record decisions with `gridmind_record_decision` using `title` and `body`. Both worker prompts and `gridmind_get_context` include project key-values and relevant decisions. Spawned prompts are snapshots; running external agents must fetch context again to see later changes.
+
+Persistence is stored in `.gridmind/gridmind.db` under the server working directory. Set an absolute `GRIDMIND_DATA_DIR` to keep the same store when changing how the server is launched. The root-level `agentmind.db` is unused. Back up an existing database before upgrading; migrations preserve rows and run transactionally. Do not delete the database as a troubleshooting step.
+
+`GET /api/health` checks SQLite readiness and reports `pendingMemoryCaptures`. Automatic captures use a durable retry queue; responses report `memory_capture`, and subsequent context reads retry pending writes. If the database is entirely unwritable, the action reports a capture error rather than claiming memory was saved.
+
+The dashboard is a trusted local operator interface, not an authenticated hosted service. Development and production scripts bind to `127.0.0.1`; do not expose it publicly without an authenticated proxy. The MCP transport currently implemented is local stdio, backed by the HTTP API.
+
 ## Additional Notes
 
 ### MCP Tools Reference (All 20 Tools)
@@ -321,13 +348,13 @@ node scripts/stage5c-demo.mjs
 | Category | Tool | Parameters | Description |
 |---|---|---|---|
 | **Context & Memory** | `gridmind_set_context` | `key`, `value` | Persists or updates a persistent project context key-value entry (immediately visible in Web UI). |
-| | `gridmind_get_context` | `taskId?` | Retrieves token-budgeted project brief, task details, and incoming handoffs. |
+| | `gridmind_get_context` | `taskId?` | Retrieves project key-values, relevant memories and decisions, task details, and incoming handoffs. |
 | | `gridmind_get_session_context` | _none_ | Inspects authenticated agent session, task assignment, and role. |
-| | `gridmind_record_memory` | `content`, `type`, `importance?`, `scope?` | Records a knowledge item (`fact`, `constraint`, `decision`) into project or task memory. |
-| | `gridmind_search_memory` | `query`, `type?`, `scope?` | Searches memories using semantic query matching. |
-| | `gridmind_record_decision` | `summary`, `rationale`, `status?` | Records an architectural decision in the project decision log. |
+| | `gridmind_record_memory` | `content`, `category?`, `importance?`, `scope` | Records a knowledge item (`fact`, `discovery`, `constraint`, `note`) into project or task memory. |
+| | `gridmind_search_memory` | `query?`, `category?`, `limit?`, `task_id?` | Ranks memories using deterministic keyword matching; embeddings are not implemented. |
+| | `gridmind_record_decision` | `title`, `body` | Records an architectural decision in the project decision log. |
 | | `gridmind_get_task` | `taskId?` | Inspects the assigned task details, status, and branch. |
-| | `gridmind_update_task_status` | `status`, `notes?` | Updates task status (`in_progress`, `blocked`, `done`, `failed`). Auto-records memory on completion. |
+| | `gridmind_update_task_status` | `status`, `description?`, `task_id?` | Updates task status (`in_progress`, `blocked`, `done`, `failed`). Auto-records memory on completion. |
 | | `gridmind_emit_event` | `event`, `data?` | Emits custom project events to the live SSE stream. |
 | **Git Operations** | `gridmind_git_status` | `taskId?` | Returns clean/dirty state, branch, changed files, and ahead/behind count for the worktree. |
 | | `gridmind_git_diff` | `path?`, `staged?`, `commit?`, `taskId?` | Returns bounded diff (unstaged, staged, or against a commit SHA). Rejects path traversal (`../`). |
@@ -345,21 +372,17 @@ node scripts/stage5c-demo.mjs
 
 ### Running Tests
 
-GridMind is backed by a 671-test automated suite covering all lifecycles, memory isolation, and MCP tools:
+Run the unit regressions and isolated integration harness. The harness creates its own database and repositories and disables real agent commands:
 
 ```bash
-node tests/agent-api.mjs && \
-node tests/stage2-lifecycle.mjs && \
-node tests/audit-regression.mjs && \
-node tests/stage3-worktree.mjs && \
-node tests/stage4-memory.mjs && \
-node tests/stage4-retrieval.mjs && \
-node tests/stage4-security.mjs && \
-node tests/stage4-task-auth.mjs && \
-node tests/mcp-stage5a.mjs && \
-node tests/stage5b-handoffs.mjs && \
-node tests/stage5c-git-github.mjs
+npm test
+npm run typecheck
+npm run lint
+npm run build
+npm run test:integration
 ```
+
+Do not run the older individual integration scripts against a server containing your own projects. They create/delete fixture repositories. `npm run test:integration` runs all eleven documented suites against a disposable server, with no GitHub credentials and no paid agent execution. These checks validate the bridge and API; they do not validate real model behavior or live GitHub operations.
 
 ### Static Checks & Linting
 ```bash
@@ -369,11 +392,11 @@ npm run lint        # ESLint
 
 ---
 
-### Security Invariants
+### Local security boundaries
 * **Worktree Path Derivation**: Worker agents cannot supply arbitrary filesystem paths; worktrees are derived server-side via `session.task_id → task.worktree_path`.
 * **Path Traversal Protection**: All diff paths and worktree operations verify canonical paths and reject `../`.
-* **Zero Credential Leaks**: `GITHUB_TOKEN`, session auth tokens, and private database credentials are never returned in MCP outputs or emitted in SSE event logs.
-* **Token Budgeting**: Bounded diffs (30k char ceiling) and memory retrieval budgeting (1,000 tokens max) protect LLMs from context window exhaustion.
+* **Session tokens**: Issued when a local operator creates an agent session; general dashboard session lists omit tokens. Agent APIs enforce scope, and general dashboard context lists include shared memories only.
+* **Token budgeting**: Diffs are bounded to 30k characters. Memory search defaults to 1,000 estimated tokens (configurable up to 10,000); long records return marked excerpts. Project key-values are separate from that memory budget.
 
 ---
 

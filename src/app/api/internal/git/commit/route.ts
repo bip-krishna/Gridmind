@@ -1,9 +1,9 @@
+import { captureMemory } from "@/lib/memory-capture";
 import { NextResponse } from "next/server";
 import { authenticateAgent } from "@/lib/internal-auth";
 import { resolveSessionWorktree, runGitSafe } from "@/lib/git-internal";
-import { updateTask, createMemory, setContext } from "@/lib/db";
+import { updateTask, setContext } from "@/lib/db";
 import { publish } from "@/lib/events";
-import { nanoid } from "nanoid";
 
 export const runtime = "nodejs";
 
@@ -37,6 +37,8 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: resolved.error }, { status: resolved.status });
   }
 
+  let memoryCapture = { captured: true, pending: 0 };
+
   const { worktreePath, task, projectId } = resolved;
 
   try {
@@ -67,8 +69,7 @@ export async function POST(req: Request) {
 
     // Auto-record commit to project memory so agents/system share context automatically
     try {
-      createMemory(projectId, {
-        id: nanoid(),
+      memoryCapture = captureMemory(projectId, {
         scope: "project_shared",
         type: "fact",
         content: `Git commit ${shortSha} on ${branch}: "${message}"`,
@@ -79,7 +80,7 @@ export async function POST(req: Request) {
       });
       setContext(projectId, "latest_commit", `${shortSha} — ${message}`);
     } catch {
-      /* ignore automatic memory error */
+      return NextResponse.json({ error: "Commit succeeded, but memory capture failed. Do not repeat the commit; save its summary with record_memory.", commit_succeeded: true, commit_sha: commitSha }, { status: 500 });
     }
 
     // Publish git:commit event (no secrets, no private memory)
@@ -93,6 +94,7 @@ export async function POST(req: Request) {
 
     return NextResponse.json({
       ok: true,
+      memory_capture: memoryCapture,
       commit_sha: commitSha,
       short_sha: shortSha,
       message,

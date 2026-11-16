@@ -30,6 +30,8 @@ const REFRESH_TYPES: Set<string> = new Set([
   "context:deleted",
   "decision:created",
   "memory:created",
+  "memory:capture-pending",
+  "memory:capture-failed",
   "memory:updated",
   "memory:archived",
   "issue:imported",

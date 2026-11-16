@@ -145,6 +145,8 @@ export class GridMindClient {
       query: options.query,
       max_tokens: options.limit ?? 1000,
       scopes,
+      types: options.category && ["fact", "discovery", "constraint", "note"].includes(options.category)
+        ? [options.category] : undefined,
       task_id: options.taskId,
     });
   }

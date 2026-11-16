@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getProject } from "@/lib/db";
 import { retrieveMemories } from "@/lib/memory";
 import { authenticateAgent } from "@/lib/internal-auth";
+import { retrievalInput } from "@/lib/retrieval-input";
 
 export const runtime = "nodejs";
 
@@ -17,18 +18,21 @@ export async function GET(
   const taskId = url.searchParams.get("task_id") || undefined;
   const query = url.searchParams.get("query") || undefined;
   const maxTokensParam = url.searchParams.get("max_tokens");
-  const maxTokens = maxTokensParam ? parseInt(maxTokensParam, 10) : undefined;
+  const parsed = retrievalInput.safeParse({ query, max_tokens: maxTokensParam === null ? undefined : Number(maxTokensParam) });
+  if (!parsed.success) return NextResponse.json({ error: parsed.error.message }, { status: 400 });
+  const maxTokens = parsed.data.max_tokens;
 
   // SEC-04: Never allow caller to supply session_id via query param to unlock private memory.
   // Private memory is ONLY accessible if request carries a valid Bearer token for that session.
   let authenticatedSessionId: string | undefined = undefined;
-  let effectiveTaskId = taskId;
+  let effectiveTaskId: string | undefined;
   const auth = authenticateAgent(req);
   if (auth.ok) {
     if (auth.session.project_id !== id) {
       return NextResponse.json({ error: "project mismatch — agent does not belong to this project" }, { status: 403 });
     }
     authenticatedSessionId = auth.session.id;
+    effectiveTaskId = taskId;
 
     // Cross-task authorization:
     // A worker session cannot pass taskId of another task to access its context.

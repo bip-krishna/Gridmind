@@ -99,7 +99,7 @@ export class OpenCodeAdapter implements AgentAdapter {
         break;
       }
       case "step_finish":
-        emit({ type: "final", step: "done", text: "" });
+        emit({ type: "status", step: "working", text: "Step finished; waiting for agent exit." });
         break;
       default:
         break;

@@ -14,7 +14,7 @@ export async function GET(
   return NextResponse.json({
     context: listContext(id),
     brief: buildContextBrief(id),
-    memories: listMemories(id, { includeArchived: false }),
+    memories: listMemories(id, { scope: "project_shared", includeArchived: false }),
   });
 }
 

@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { nanoid } from "nanoid";
 
-const DATA_DIR = path.join(process.cwd(), ".gridmind");
+const DATA_DIR = path.resolve(process.env.GRIDMIND_DATA_DIR || path.join(process.cwd(), ".gridmind"));
 
 export function dataDir(): string {
   return DATA_DIR;
@@ -20,13 +20,26 @@ function createDb(): Database.Database {
   const db = new Database(path.join(DATA_DIR, "gridmind.db"));
   db.pragma("journal_mode = WAL");
   db.pragma("foreign_keys = ON");
-  migrate(db);
-  return db;
+  try {
+    db.transaction(() => migrate(db))();
+    return db;
+  } catch (error) {
+    db.close();
+    throw error;
+  }
 }
 
 export function db(): Database.Database {
   if (!globalForDb.__gridmindDb) globalForDb.__gridmindDb = createDb();
   return globalForDb.__gridmindDb;
+}
+
+function addColumn(db: Database.Database, table: string, definition: string): void {
+  const name = definition.split(" ")[0];
+  const columns = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
+  if (!columns.some((column) => column.name === name)) {
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${definition}`);
+  }
 }
 
 function migrate(db: Database.Database): void {
@@ -122,40 +135,42 @@ function migrate(db: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_agents_project ON agents(project_id);
     CREATE INDEX IF NOT EXISTS idx_tasks_project ON tasks(project_id);
     CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project_id);
-    CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions(token);
-    CREATE INDEX IF NOT EXISTS idx_sessions_task_id ON sessions(task_id);
     CREATE INDEX IF NOT EXISTS idx_events_project ON events(project_id, id);
   `);
 
   // Migration: add token/agent_config_id to sessions for existing DBs
-  try { db.exec(`ALTER TABLE sessions ADD COLUMN token TEXT`); } catch { /* already exists */ }
-  try { db.exec(`ALTER TABLE sessions ADD COLUMN agent_config_id TEXT`); } catch { /* already exists */ }
+  addColumn(db, "sessions", "token TEXT");
+  addColumn(db, "sessions", "agent_config_id TEXT");
 
   // Migration: add task_id to sessions
-  try { db.exec(`ALTER TABLE sessions ADD COLUMN task_id TEXT`); } catch { /* already exists */ }
+  addColumn(db, "sessions", "task_id TEXT");
 
   // Migration: add result fields to sessions
-  try { db.exec(`ALTER TABLE sessions ADD COLUMN result_summary TEXT`); } catch { /* already exists */ }
-  try { db.exec(`ALTER TABLE sessions ADD COLUMN result_status TEXT`); } catch { /* already exists */ }
-  try { db.exec(`ALTER TABLE sessions ADD COLUMN result_files TEXT`); } catch { /* already exists */ }
-  try { db.exec(`ALTER TABLE sessions ADD COLUMN result_decisions TEXT`); } catch { /* already exists */ }
-  try { db.exec(`ALTER TABLE sessions ADD COLUMN result_blockers TEXT`); } catch { /* already exists */ }
-  try { db.exec(`ALTER TABLE sessions ADD COLUMN result_next_steps TEXT`); } catch { /* already exists */ }
-  try { db.exec(`ALTER TABLE sessions ADD COLUMN result_commits TEXT`); } catch { /* already exists */ }
+  addColumn(db, "sessions", "result_summary TEXT");
+  addColumn(db, "sessions", "result_status TEXT");
+  addColumn(db, "sessions", "result_files TEXT");
+  addColumn(db, "sessions", "result_decisions TEXT");
+  addColumn(db, "sessions", "result_blockers TEXT");
+  addColumn(db, "sessions", "result_next_steps TEXT");
+  addColumn(db, "sessions", "result_commits TEXT");
 
   // Stage 3: add worktree columns to tasks
-  try { db.exec(`ALTER TABLE tasks ADD COLUMN worktree_path TEXT`); } catch { /* already exists */ }
-  try { db.exec(`ALTER TABLE tasks ADD COLUMN worktree_branch TEXT`); } catch { /* already exists */ }
-  try { db.exec(`ALTER TABLE tasks ADD COLUMN worktree_status TEXT NOT NULL DEFAULT 'none'`); } catch { /* already exists */ }
-  try { db.exec(`ALTER TABLE tasks ADD COLUMN worktree_base_branch TEXT`); } catch { /* already exists */ }
+  addColumn(db, "tasks", "worktree_path TEXT");
+  addColumn(db, "tasks", "worktree_branch TEXT");
+  addColumn(db, "tasks", "worktree_status TEXT NOT NULL DEFAULT 'none'");
+  addColumn(db, "tasks", "worktree_base_branch TEXT");
 
   // Stage 5C: add git and GitHub tracking columns to tasks
-  try { db.exec(`ALTER TABLE tasks ADD COLUMN latest_commit TEXT`); } catch { /* already exists */ }
-  try { db.exec(`ALTER TABLE tasks ADD COLUMN pr_number INTEGER`); } catch { /* already exists */ }
-  try { db.exec(`ALTER TABLE tasks ADD COLUMN pr_url TEXT`); } catch { /* already exists */ }
+  addColumn(db, "tasks", "latest_commit TEXT");
+  addColumn(db, "tasks", "pr_number INTEGER");
+  addColumn(db, "tasks", "pr_url TEXT");
 
-  // Stage 3: unique index — no two tasks can share a worktree branch
-  try { db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_worktree_branch ON tasks(worktree_branch) WHERE worktree_branch IS NOT NULL`); } catch { /* already exists */ }
+  // Indexes must follow legacy column additions. Unexpected migration errors propagate.
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions(token);
+    CREATE INDEX IF NOT EXISTS idx_sessions_task_id ON sessions(task_id);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_worktree_branch ON tasks(worktree_branch) WHERE worktree_branch IS NOT NULL;
+  `);
 
   // Stage 4: agent memory
   db.exec(`
@@ -206,9 +221,21 @@ function migrate(db: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_handoffs_project_status ON handoffs(project_id, status);
   `);
 
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS memory_capture_queue (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      payload TEXT NOT NULL,
+      attempts INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_capture_project ON memory_capture_queue(project_id);
+    PRAGMA user_version = 1;
+  `);
+
   // Stage 5C: add commit_sha and branch to handoffs for existing DBs
-  try { db.exec(`ALTER TABLE handoffs ADD COLUMN commit_sha TEXT`); } catch { /* already exists */ }
-  try { db.exec(`ALTER TABLE handoffs ADD COLUMN branch TEXT`); } catch { /* already exists */ }
+  addColumn(db, "handoffs", "commit_sha TEXT");
+  addColumn(db, "handoffs", "branch TEXT");
 }
 
 export type Project = {

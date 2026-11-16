@@ -1,9 +1,9 @@
+import { captureMemory } from "@/lib/memory-capture";
 import { NextResponse } from "next/server";
 import { authenticateAgent } from "@/lib/internal-auth";
-import { getTask, updateTask, getProject, createMemory } from "@/lib/db";
+import { getTask, updateTask, getProject } from "@/lib/db";
 import { validateTaskTransition } from "@/lib/task-transitions";
 import { publish } from "@/lib/events";
-import { nanoid } from "nanoid";
 
 export const runtime = "nodejs";
 
@@ -80,11 +80,12 @@ export async function POST(
     sessionId: session.id,
   });
 
+  let memoryCapture = { captured: true, pending: 0 };
+
   // Auto-record task completion to project memory
   if (updated.status === "done") {
     try {
-      createMemory(session.project_id, {
-        id: nanoid(),
+      memoryCapture = captureMemory(session.project_id, {
         scope: "project_shared",
         type: "fact",
         content: `Task completed: "${updated.title}"${updated.latest_commit ? ` (Commit: ${updated.latest_commit.slice(0, 7)})` : ""}`,
@@ -94,11 +95,11 @@ export async function POST(
         task_id: updated.id,
       });
     } catch {
-      /* ignore */
+      return NextResponse.json({ error: "Action saved, but memory capture failed. Save the summary with record_memory." }, { status: 500 });
     }
   }
 
-  return NextResponse.json({ task: updated });
+  return NextResponse.json({ task: updated, memory_capture: memoryCapture });
 }
 
 export async function GET(

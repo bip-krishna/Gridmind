@@ -42249,6 +42249,7 @@ var GridMindClient = class {
       query: options.query,
       max_tokens: options.limit ?? 1e3,
       scopes,
+      types: options.category && ["fact", "discovery", "constraint", "note"].includes(options.category) ? [options.category] : void 0,
       task_id: options.taskId
     });
   }

@@ -30,59 +30,65 @@ export function ContextPanel({ projectId, refreshKey }: { projectId: string; ref
   const [statusFilter, setStatusFilter] = useState("all");
   const [memFilter, setMemFilter] = useState("all");
 
-  async function load() {
-    const [c, d] = await Promise.all([
-      fetch(`/api/projects/${projectId}/context`).then((r) => r.json()).catch(() => ({ context: [], brief: "", memories: [] })),
-      fetch(`/api/projects/${projectId}/decisions`).then((r) => r.json()).catch(() => ({ decisions: [] })),
-    ]);
-    setEntries(c.context ?? []);
-    setBrief(c.brief ?? "");
-    setMemories(c.memories ?? []);
-    setDecisions(d.decisions ?? []);
+  const [error, setError] = useState<string | null>(null);
+
+  async function request<T>(url: string, options?: RequestInit): Promise<T> {
+    const response = await fetch(url, options);
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || `Request failed (${response.status})`);
+    return data as T;
   }
 
-  useEffect(() => {
-    load();
-  }, [projectId, refreshKey]);
+  async function load() {
+    try {
+      const [c, d] = await Promise.all([
+        request<{ context: ContextEntry[]; brief: string; memories: MemoryEntry[] }>(`/api/projects/${projectId}/context`),
+        request<{ decisions: Decision[] }>(`/api/projects/${projectId}/decisions`),
+      ]);
+      setEntries(c.context);
+      setBrief(c.brief);
+      setMemories(c.memories);
+      setDecisions(d.decisions);
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }
 
-  async function addContext() {
-    if (!key.trim()) return;
+  useEffect(() => { void load(); }, [projectId, refreshKey]);
+
+  async function mutate(url: string, options: RequestInit, onSaved: () => void) {
     setBusy(true);
     try {
-      await fetch(`/api/projects/${projectId}/context`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ key: key.trim(), value }),
-      });
-      setKey("");
-      setValue("");
+      await request(url, options);
+      onSaved();
       await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
     } finally {
       setBusy(false);
     }
   }
 
+  async function addContext() {
+    if (!key.trim()) return;
+    await mutate(`/api/projects/${projectId}/context`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ key: key.trim(), value }),
+    }, () => { setKey(""); setValue(""); });
+  }
+
   async function removeContext(k: string) {
-    await fetch(`/api/projects/${projectId}/context?key=${encodeURIComponent(k)}`, { method: "DELETE" });
-    setConfirmDel(null);
-    await load();
+    await mutate(`/api/projects/${projectId}/context?key=${encodeURIComponent(k)}`,
+      { method: "DELETE" }, () => setConfirmDel(null));
   }
 
   async function addDecision() {
     if (!dTitle.trim()) return;
-    setBusy(true);
-    try {
-      await fetch(`/api/projects/${projectId}/decisions`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: dTitle.trim(), body: dBody }),
-      });
-      setDTitle("");
-      setDBody("");
-      await load();
-    } finally {
-      setBusy(false);
-    }
+    await mutate(`/api/projects/${projectId}/decisions`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: dTitle.trim(), body: dBody }),
+    }, () => { setDTitle(""); setDBody(""); });
   }
 
   const filteredDecisions = statusFilter === "all" ? decisions : decisions.filter((d) => d.status === statusFilter);
@@ -90,6 +96,9 @@ export function ContextPanel({ projectId, refreshKey }: { projectId: string; ref
 
   return (
     <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+      {error && <div role="alert" className="col-span-full rounded-md border border-red p-3 text-sm text-red">
+        {error} <button onClick={() => void load()} className="underline">Retry</button>
+      </div>}
       {/* Left Column: Key-Value Context + Decisions */}
       <div className="flex flex-col gap-4">
         {/* Project context */}

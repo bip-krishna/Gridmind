@@ -1,3 +1,4 @@
+import { flushMemoryCaptures } from "./memory-capture";
 /**
  * Stage 4 Phase 2: Project-Scoped Memory Retrieval.
  *
@@ -7,13 +8,16 @@
 
 import {
   listMemories,
+  listDecisions,
   type Memory,
   type MemoryScope,
+  type MemoryType,
 } from "./db";
 
 export type ScoredMemory = Memory & {
   score: number;
   relevance_reasons: string[];
+  truncated?: boolean;
 };
 
 export type RetrieveMemoryOptions = {
@@ -23,6 +27,7 @@ export type RetrieveMemoryOptions = {
   query?: string | null;
   maxTokens?: number; // Default 1,000 tokens (~4,000 chars)
   scopes?: MemoryScope[];
+  types?: MemoryType[];
 };
 
 export type RetrievalResult = {
@@ -165,15 +170,30 @@ export function estimateTokens(text: string): number {
  * Retrieve, rank, filter, and budget-compact project-scoped memories.
  */
 export function retrieveMemories(options: RetrieveMemoryOptions): RetrievalResult {
-  const { projectId, sessionId, taskId, query, maxTokens = 1000, scopes } = options;
+  const { projectId, sessionId, taskId, query, maxTokens = 1000, scopes, types } = options;
+
+  flushMemoryCaptures(projectId);
 
   // 1. Fetch unarchived memories for project
   // We fetch all active memories for the project and apply visibility in memory for complete control
   const allActive = listMemories(projectId, { includeArchived: false });
+  // Decisions remain authoritative in their own table; old and new records are retrievable.
+  for (const decision of listDecisions(projectId)) {
+    if (decision.status === "superseded") continue;
+    if (allActive.some((m) => m.source === "decision" && m.content === `Architectural Decision: ${decision.title}`)) continue;
+    allActive.push({
+      id: `decision:${decision.id}`, project_id: projectId,
+      scope: "project_shared", session_id: null, task_id: null,
+      type: "constraint", content: `Architectural Decision: ${decision.title}\n${decision.body}`,
+      importance: 3, source: "decision", created_at: decision.created_at,
+      updated_at: decision.created_at, archived_at: null,
+    });
+  }
 
   // 2. Apply Visibility Rules
   const candidates: Memory[] = [];
   for (const m of allActive) {
+    if (types && !types.includes(m.type)) continue;
     // If specific scopes were requested, enforce them
     if (scopes && !scopes.includes(m.scope)) {
       continue;
@@ -220,77 +240,50 @@ export function retrieveMemories(options: RetrieveMemoryOptions): RetrievalResul
   // Sort descending by score, tie-break by created_at DESC
   scored.sort((a, b) => b.score - a.score || b.created_at - a.created_at);
 
-  // 4. Token Budget Packing
-  // Group scored candidates into scope buckets while respecting total token limit
+  // Measure the complete formatted brief, including section headers and omission notice.
+  // Long records receive excerpts instead of disappearing from context entirely.
+  const budget = Number.isFinite(maxTokens) ? Math.max(1, Math.min(10000, Math.floor(maxTokens))) : 1000;
   const selected: ScoredMemory[] = [];
-  let currentTokens = 0;
-  let omittedCount = 0;
+  const notice = `[... ${totalCandidates} lower-priority memories omitted for brevity]`;
+  const contentBudget = Math.max(0, budget - estimateTokens("\n\n" + notice));
 
-  // Header/formatting tokens reserve (~30 tokens)
-  const budgetLimit = Math.max(50, maxTokens - 30);
+  function brief(items: ScoredMemory[]): string {
+    return ([
+      ["project_shared", "[PROJECT SHARED KNOWLEDGE]"],
+      ["task", "[CURRENT TASK CONTEXT]"],
+      ["agent_private", "[YOUR PRIVATE NOTES]"],
+    ] as const).flatMap(([scope, header]) => {
+      const matches = items.filter((m) => m.scope === scope);
+      return matches.length ? [header + "\n" + matches.map(formatMemoryLine).join("\n")] : [];
+    }).join("\n\n");
+  }
 
   for (const mem of scored) {
-    const line = formatMemoryLine(mem);
-    const lineTokens = estimateTokens(line + "\n");
-
-    if (currentTokens + lineTokens <= budgetLimit) {
+    if (estimateTokens(brief([...selected, mem])) <= contentBudget) {
       selected.push(mem);
-      currentTokens += lineTokens;
-    } else {
-      omittedCount++;
+      continue;
+    }
+    // Binary search accounts for delimiter escaping and formatting overhead.
+    let low = 0;
+    let high = mem.content.length;
+    while (low < high) {
+      const mid = Math.ceil((low + high) / 2);
+      const excerpt = { ...mem, content: mem.content.slice(0, mid) + "… [truncated]", truncated: true };
+      if (estimateTokens(brief([...selected, excerpt])) <= contentBudget) low = mid;
+      else high = mid - 1;
+    }
+    if (low >= Math.min(80, mem.content.length)) {
+      selected.push({ ...mem, content: mem.content.slice(0, low) + "… [truncated]", truncated: true });
     }
   }
 
-  // 5. Build Formatted Context Brief
-  if (selected.length === 0) {
-    return {
-      memories: [],
-      contextBrief: "",
-      tokensUsed: 0,
-      totalCandidates,
-      omittedCount,
-    };
+  const omittedCount = totalCandidates - selected.length;
+  let contextBrief = brief(selected);
+  if (contextBrief && omittedCount > 0) {
+    contextBrief += `\n\n[... ${omittedCount} lower-priority memories omitted for brevity]`;
   }
-
-  const sharedItems = selected.filter((m) => m.scope === "project_shared");
-  const taskItems = selected.filter((m) => m.scope === "task");
-  const privateItems = selected.filter((m) => m.scope === "agent_private");
-
-  const sections: string[] = [];
-
-  if (sharedItems.length > 0) {
-    sections.push(
-      "[PROJECT SHARED KNOWLEDGE]\n" +
-        sharedItems.map(formatMemoryLine).join("\n")
-    );
-  }
-
-  if (taskItems.length > 0) {
-    sections.push(
-      "[CURRENT TASK CONTEXT]\n" +
-        taskItems.map(formatMemoryLine).join("\n")
-    );
-  }
-
-  if (privateItems.length > 0) {
-    sections.push(
-      "[YOUR PRIVATE NOTES]\n" +
-        privateItems.map(formatMemoryLine).join("\n")
-    );
-  }
-
-  if (omittedCount > 0) {
-    sections.push(`[... ${omittedCount} lower-priority memories omitted for brevity]`);
-  }
-
-  const contextBrief = sections.join("\n\n");
-  const tokensUsed = estimateTokens(contextBrief);
-
   return {
-    memories: selected,
-    contextBrief,
-    tokensUsed,
-    totalCandidates,
-    omittedCount,
+    memories: selected, contextBrief, tokensUsed: estimateTokens(contextBrief),
+    totalCandidates, omittedCount,
   };
 }

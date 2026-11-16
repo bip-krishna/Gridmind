@@ -1,6 +1,7 @@
+import { captureMemory } from "@/lib/memory-capture";
 import { NextResponse } from "next/server";
 import { authenticateAgent } from "@/lib/internal-auth";
-import { getProject, getTask, createHandoff, listHandoffs, createMemory, type HandoffStatus } from "@/lib/db";
+import { getProject, getTask, createHandoff, listHandoffs, type HandoffStatus } from "@/lib/db";
 import { publish } from "@/lib/events";
 import { nanoid } from "nanoid";
 
@@ -171,10 +172,11 @@ export async function POST(req: Request) {
     target_task_id: handoff.target_task_id,
   });
 
+  let memoryCapture = { captured: true, pending: 0 };
+
   // Auto-record handoff to project memory
   try {
-    createMemory(auth.session.project_id, {
-      id: nanoid(),
+    memoryCapture = captureMemory(auth.session.project_id, {
       scope: "project_shared",
       type: "discovery",
       content: `Handoff [${handoff.id.slice(0, 8)}] Task ${handoff.source_task_id} -> ${handoff.target_task_id}: ${handoff.summary}${handoff.commit_sha ? ` (Commit: ${handoff.commit_sha.slice(0, 7)})` : ""}`,
@@ -184,10 +186,10 @@ export async function POST(req: Request) {
       task_id: handoff.source_task_id,
     });
   } catch {
-    /* ignore */
+    return NextResponse.json({ error: "Action saved, but memory capture failed. Save the summary with record_memory." }, { status: 500 });
   }
 
-  return NextResponse.json({ ok: true, handoff }, { status: 201 });
+  return NextResponse.json({ ok: true, handoff, memory_capture: memoryCapture }, { status: 201 });
 }
 
 export async function GET(req: Request) {

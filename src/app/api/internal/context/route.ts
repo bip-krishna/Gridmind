@@ -50,7 +50,7 @@ export async function GET(req: Request) {
   }
 
   const { getTask, listContext } = await import("@/lib/db");
-  const { retrieveMemories } = await import("@/lib/memory");
+  const { retrieveProjectContext } = await import("@/lib/project-context");
   const { retrieveTaskHandoffs } = await import("@/lib/handoff");
 
   let effectiveTaskId = auth.session.task_id;
@@ -69,7 +69,7 @@ export async function GET(req: Request) {
   const projectContext = listContext(auth.session.project_id);
 
   // Retrieve relevant memory context for the task/session
-  const memoryResult = retrieveMemories({
+  const memoryResult = retrieveProjectContext({
     projectId: auth.session.project_id,
     sessionId: auth.session.id,
     taskId: effectiveTaskId,
@@ -104,6 +104,7 @@ export async function GET(req: Request) {
     context: projectContext,
     memories: memoryResult.memories,
     contextBrief: memoryResult.contextBrief,
+    decisions: memoryResult.decisions,
     handoffs: handoffsResult.handoffs,
     handoffsBrief: handoffsResult.handoffsBrief,
   });

@@ -1,3 +1,4 @@
+import { captureMemory } from "./memory-capture";
 import type { EventRecord } from "./db";
 import {
   appendSessionOutput,
@@ -8,7 +9,6 @@ import {
   updateSession,
   getTask,
   updateTask,
-  createMemory,
   type Session,
 } from "./db";
 import { getAdapter, newId, type AgentMessage, type AgentType } from "./agents";
@@ -17,7 +17,7 @@ import { invalidateRepoInfo } from "./git";
 import { nanoid } from "nanoid";
 import { validateTaskTransition } from "./task-transitions";
 import { provisionWorktree } from "./worktree";
-import { retrieveMemories } from "./memory";
+import { retrieveProjectContext } from "./project-context";
 import { retrieveTaskHandoffs } from "./handoff";
 
 const globalForRunner = globalThis as unknown as {
@@ -113,13 +113,16 @@ export async function startAgentSession(input: {
         task = wtTask;
       }
     } catch (err) {
-      // Worktree provisioning failed — log but continue with main repo
+      // A task must never run in the main repository when provisioning fails.
       const errMsg = err instanceof Error ? err.message : String(err);
       appendSessionOutput(input.projectId, session.id, `[GridMind] Worktree provisioning failed: ${errMsg}\n`);
       publish(input.projectId, "worktree:error", {
         taskId: input.taskId,
         error: errMsg,
       });
+      finishSession(session, { status: "error", current_step: "worktree-error", exit_code: 1 },
+        "Task stopped because its isolated worktree could not be provisioned.", input.taskId, "failed");
+      return { session: getSession(input.projectId, session.id)! };
     }
   }
 
@@ -167,7 +170,7 @@ export async function startAgentSession(input: {
   }
 
   // Build environment variables for agent → GridMind communication
-  const apiUrl = process.env.GRIDMIND_API_URL || "http://localhost:3000";
+  const apiUrl = process.env.GRIDMIND_API_URL || process.env.GRIDMIND_API || `http://127.0.0.1:${process.env.PORT || 3000}`;
   const agentEnv: Record<string, string> = {
     GRIDMIND_API: apiUrl,
     GRIDMIND_PROJECT_ID: input.projectId,
@@ -181,7 +184,7 @@ export async function startAgentSession(input: {
   // Stage 4 Phase 2: Retrieve relevant project memory context
   let memoryBrief = "";
   try {
-    const memResult = retrieveMemories({
+    const memResult = retrieveProjectContext({
       projectId: input.projectId,
       sessionId: session.id,
       taskId: input.taskId || null,
@@ -189,8 +192,10 @@ export async function startAgentSession(input: {
       maxTokens: 1000,
     });
     memoryBrief = memResult.contextBrief;
-  } catch {
-    /* ignore retrieval error */
+  } catch (error) {
+    finishSession(session, { status: "error", current_step: "context-error", exit_code: 1 },
+      `Project context could not be loaded: ${error instanceof Error ? error.message : String(error)}`, input.taskId, "failed");
+    return { session: getSession(input.projectId, session.id)! };
   }
 
   // Stage 5B: Retrieve relevant task handoffs
@@ -209,7 +214,7 @@ export async function startAgentSession(input: {
   }
 
   // Append GridMind API instructions, handoffs context, and memory context to the prompt
-  const apiInstructions = buildApiInstructions(project.repo_path);
+  const apiInstructions = buildApiInstructions();
   const promptParts = [input.prompt];
   if (handoffsBrief) {
     promptParts.push(
@@ -253,19 +258,9 @@ export async function startAgentSession(input: {
     if (msg.type === "status" && !finished) {
       updateSession(input.projectId, session.id, { current_step: msg.step });
     }
-    if (msg.type === "final" && !finished) {
-      finished = true;
-      if (msg.step && ["done", "blocked", "failed"].includes(msg.step)) {
-        agentReportedStatus = msg.step;
-      }
-      const taskStatus = agentReportedStatus || "done";
-      finishSession(
-        session,
-        { status: "done", current_step: "done", exit_code: 0 },
-        undefined,
-        input.taskId,
-        taskStatus
-      );
+    if (msg.type === "final" && !finished && ["done", "blocked", "failed"].includes(msg.step)) {
+      // Record intent; only process close establishes successful completion.
+      agentReportedStatus = msg.step;
     }
   };
 
@@ -317,10 +312,13 @@ export async function startAgentSession(input: {
     if (!finished) {
       finished = true;
       let taskStatus = "done";
-      if (agentReportedStatus) {
-        taskStatus = agentReportedStatus;
-      } else if (code !== 0 && code !== null) {
-        taskStatus = "failed";
+      if (code !== 0) taskStatus = "failed";
+      else if (agentReportedStatus) taskStatus = agentReportedStatus;
+      else {
+        const latest = getSession(input.projectId, session.id);
+        if (latest?.result_status && ["done", "blocked", "failed"].includes(latest.result_status)) {
+          taskStatus = latest.result_status;
+        }
       }
 
       finishSession(
@@ -404,8 +402,7 @@ function finishSession(
       if (finalTaskStatus === "done") {
         try {
           if (freshTask) {
-            createMemory(session.project_id, {
-              id: nanoid(),
+            captureMemory(session.project_id, {
               scope: "project_shared",
               type: "fact",
               content: `Task completed: "${freshTask.title}"${freshTask.latest_commit ? ` (Commit: ${freshTask.latest_commit.slice(0, 7)})` : ""}`,
@@ -416,7 +413,8 @@ function finishSession(
             });
           }
         } catch {
-          /* ignore */
+          appendSessionOutput(session.project_id, session.id, "[GridMind] ERROR: task memory capture failed. Save the task summary again.\n");
+          publish(session.project_id, "memory:capture-failed", { sessionId: session.id, taskId });
         }
       }
     }
@@ -432,7 +430,7 @@ function finishSession(
   runnerState().active.delete(session.id);
 }
 
-function buildApiInstructions(_repoPath: string): string {
+function buildApiInstructions(): string {
   return `
 --- GRIDMIND API (agent → server communication) ---
 You have access to the GridMind API for structured communication.

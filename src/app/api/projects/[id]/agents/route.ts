@@ -13,10 +13,11 @@ export async function GET(
   const project = getProject(id);
   if (!project) return NextResponse.json({ error: "not found" }, { status: 404 });
 
-  const sessions = listSessions(id).map((s) => ({
-    ...s,
-    active: isSessionActive(s.id),
-  }));
+  const sessions = listSessions(id).map((session) => {
+    const safe = { ...session, active: isSessionActive(session.id) } as Partial<typeof session> & { active: boolean };
+    delete safe.token;
+    return safe;
+  });
 
   return NextResponse.json({ sessions, adapters: adaptersStatus() });
 }

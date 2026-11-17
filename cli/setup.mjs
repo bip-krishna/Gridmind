@@ -66,7 +66,7 @@ export function initialize(start, dryRun = false) {
   const info = projectInfo(start, !dryRun);
   const root = workspaceRoot(start);
   const args = [launcher, "mcp", "--project", root];
-  const stdio = { command: process.execPath, args };
+  const stdio = { type: "stdio", command: process.execPath, args };
   const changes = [], skipped = [];
   function plan(relative, transform) {
     try {
@@ -127,7 +127,7 @@ export function doctor(start) {
   const clients = Object.entries(paths).map(([name, file]) => ({ name, cliFound: !!binary(name), configured: read(path.join(root, file)).includes(launcher) }));
   clients.push({ name: "opencode", cliFound: !!binary("opencode"), configured: ["opencode.json", "opencode.jsonc"].some((f) => read(path.join(root, f)).includes(launcher)) });
   return { root, project_root: info.root, initialized: !!info.id, database: path.join(info.directory, "gridmind.db"), clients,
-    desktopAppsFound: process.platform === "darwin" ? ["Codex", "Cursor", "Claude"].filter((name) =>
+    desktopAppsFound: process.platform === "darwin" ? ["ChatGPT", "Codex", "Cursor", "Claude", "Visual Studio Code"].filter((name) =>
       fs.existsSync(`/Applications/${name}.app`) || fs.existsSync(path.join(os.homedir(), "Applications", `${name}.app`))) : [],
     note: "Found/configured does not mean connected. Only MCP connections can register; unknown clients need their own MCP setup." };
 }

@@ -44,7 +44,12 @@ export async function PATCH(
 
   const body = (await req.json()) as { github_repo?: string | null; name?: string };
   const patch: { github_repo?: string | null; name?: string } = {};
-  if ("github_repo" in body) patch.github_repo = body.github_repo || null;
+  if ("github_repo" in body) {
+    if (body.github_repo !== null && typeof body.github_repo !== "string") return NextResponse.json({ error: "Enter a GitHub repository as owner/repository." }, { status: 400 });
+    const repository = parseGithubRepo(body.github_repo);
+    if (body.github_repo?.trim() && !repository) return NextResponse.json({ error: "Enter a valid GitHub repository as owner/repository." }, { status: 400 });
+    patch.github_repo = repository ? `${repository.owner}/${repository.repo}` : null;
+  }
   if ("name" in body && body.name?.trim()) patch.name = body.name.trim();
 
   const { updateProject } = await import("@/lib/db");

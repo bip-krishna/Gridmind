@@ -1,214 +1,120 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { Badge, Button, Card, CardHeader, Empty, Field, Input, Textarea } from "@/components/ui";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useCallback, useEffect, useState } from "react";
+import { Badge, Button, Field, Input, Select, Spinner, Textarea } from "@/components/ui";
+import { GithubMark, integrationRequest, type GithubConnection } from "@/components/github-connect";
 
-type Issue = {
-  number: number;
-  title: string;
-  state: string;
-  url: string;
-  labels: string[];
-  createdAt: string;
-};
+type Issue = { number: number; title: string; url: string; labels: string[] };
+type Repository = { fullName: string; description: string | null; private: boolean; defaultBranch: string; url: string };
 
-type Branch = string;
-
-export function GithubPanel({ projectId, refreshKey }: { projectId: string; refreshKey: number }) {
-  const [state, setState] = useState<{ issues: Issue[]; configured: boolean; githubRepo: string | null; error?: string }>({
-    issues: [],
-    configured: false,
-    githubRepo: null,
-  });
-  const [branches, setBranches] = useState<Branch[]>([]);
+export function GithubPanel({ projectId }: { projectId: string; refreshKey: number }) {
+  const router = useRouter();
+  const [connection, setConnection] = useState<GithubConnection | null>(null);
+  const [repository, setRepository] = useState<string | null>(null);
+  const [repositories, setRepositories] = useState<Repository[]>([]);
+  const [issues, setIssues] = useState<Issue[]>([]);
+  const [branches, setBranches] = useState<string[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [searching, setSearching] = useState(false);
+  const [repoSearch, setRepoSearch] = useState("");
+  const [showPicker, setShowPicker] = useState(false);
+  const [repoResultsReady, setRepoResultsReady] = useState(false);
+  const [repositoriesTruncated, setRepositoriesTruncated] = useState(false);
+  const [manualRepo, setManualRepo] = useState("");
   const [prTitle, setPrTitle] = useState("");
   const [prHead, setPrHead] = useState("");
+  const [prBase, setPrBase] = useState("main");
   const [prBody, setPrBody] = useState("");
-  const [pushBranches, setPushBranches] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
+  const [pushBranch, setPushBranch] = useState(false);
+  const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+  const [createdPr, setCreatedPr] = useState<{ number: number; url: string } | null>(null);
 
-  async function load() {
-    const [gh, git] = await Promise.all([
-      fetch(`/api/projects/${projectId}/issues`).then((r) => r.json()).catch(() => ({ configured: false, issues: [] })),
-      fetch(`/api/projects/${projectId}/git`).then((r) => r.json()).catch(() => ({})),
-    ]);
-    setState(gh);
-    setBranches(git.branches ?? []);
-    setPrHead((p) => p || git.current || "");
+  const load = useCallback(async () => {
+    setLoading(true); setError(null); setIssues([]);
+    try {
+      const [project, git, account] = await Promise.all([
+        integrationRequest<{ project: { github_repo: string | null } }>(`/api/projects/${projectId}`),
+        integrationRequest<{ branches: string[]; current: string }>(`/api/projects/${projectId}/git`),
+        integrationRequest<GithubConnection>("/api/integrations/github"),
+      ]);
+      setConnection(account); setRepository(project.project.github_repo);
+      setBranches(git.branches); setPrHead((head) => head || git.current || git.branches[0] || "");
+      if (account.connected && project.project.github_repo) {
+        const result = await integrationRequest<{ issues: Issue[] }>(`/api/projects/${projectId}/issues`);
+        setIssues(result.issues);
+      } else setIssues([]);
+    } catch (err) { setError(err instanceof Error ? err.message : String(err)); }
+    finally { setLoading(false); }
+  }, [projectId]);
+  useEffect(() => { void load(); }, [load]);
+
+  async function findRepositories(event?: React.FormEvent) {
+    event?.preventDefault(); setSearching(true); setError(null);
+    try {
+      const result = await integrationRequest<{ repositories: Repository[]; truncated: boolean }>(`/api/integrations/github/repositories?q=${encodeURIComponent(repoSearch)}`);
+      setRepositories(result.repositories); setRepoResultsReady(true); setRepositoriesTruncated(result.truncated);
+    } catch (err) { setError(err instanceof Error ? err.message : String(err)); }
+    finally { setSearching(false); }
   }
-
-  useEffect(() => {
-    load();
-  }, [projectId, refreshKey]);
-
+  async function selectRepository(value: string, defaultBranch?: string) {
+    setBusy("repository"); setError(null); setMessage(null);
+    try {
+      await integrationRequest(`/api/projects/${projectId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ github_repo: value.trim() }) });
+      if (defaultBranch) setPrBase(defaultBranch);
+      setRepository(value); setShowPicker(false); setMessage(`Linked ${value} to this project.`); await load(); router.refresh();
+    } catch (err) { setError(err instanceof Error ? err.message : String(err)); }
+    finally { setBusy(null); }
+  }
   async function importIssue(number: number) {
-    setBusy(true);
-    setError(null);
+    setBusy(`issue-${number}`); setError(null); setMessage(null);
     try {
-      const res = await fetch(`/api/projects/${projectId}/issues`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ issue_number: number }),
-      });
-      const d = await res.json();
-      if (!res.ok) setError(d.error ?? "import failed");
-      else setMessage(`Imported #${number} as a task.`);
-    } finally {
-      setBusy(false);
-    }
+      await integrationRequest(`/api/projects/${projectId}/issues`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ issue_number: number }) });
+      setMessage(`Issue #${number} is now a task. Open Tasks to assign it to an agent.`);
+    } catch (err) { setError(err instanceof Error ? err.message : String(err)); }
+    finally { setBusy(null); }
   }
-
-  async function createPr() {
-    setError(null);
-    setMessage(null);
-    setBusy(true);
+  async function createPr(event: React.FormEvent) {
+    event.preventDefault(); setBusy("pr"); setError(null); setMessage(null); setCreatedPr(null);
     try {
-      const res = await fetch(`/api/projects/${projectId}/pr`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: prTitle, head: prHead, body: prBody, push: pushBranches }),
+      const result = await integrationRequest<{ pr: { number: number; url: string } }>(`/api/projects/${projectId}/pr`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: prTitle, head: prHead, base: prBase, body: prBody, push: pushBranch }),
       });
-      const d = await res.json();
-      if (!res.ok) setError(d.error ?? "PR creation failed");
-      else {
-        setMessage(`PR #${d.pr.number} opened → ${d.pr.url}`);
-        setPrTitle("");
-        setPrBody("");
-      }
-    } finally {
-      setBusy(false);
-    }
+      setCreatedPr(result.pr); setPrTitle(""); setPrBody("");
+    } catch (err) { setError(err instanceof Error ? err.message : String(err)); }
+    finally { setBusy(null); }
   }
-
-  return (
-    <div className="flex flex-col gap-4">
-      {/* Connection status */}
-      <Card>
-        <CardHeader
-          title="GitHub Integration"
-          subtitle={
-            state.configured
-              ? `linked to ${state.githubRepo ?? "repo"}`
-              : "not configured — set GITHUB_TOKEN and project github_repo to enable"
-          }
-          right={
-            !state.configured ? <Badge tone="amber">needs GITHUB_TOKEN</Badge> : <Badge tone="green">connected</Badge>
-          }
-        />
-        <div className="p-4">
-          <p className="mb-3 text-[11px] leading-relaxed text-fg-dim">
-            Import open issues as GridMind tasks, then open a PR for the current branch. Enable{" "}
-            <code className="font-mono text-fg-muted">GITHUB_TOKEN</code> in the environment and set the repo as{" "}
-            <code className="font-mono text-fg-muted">owner/repo</code>.
-          </p>
-          <div className="rounded-md border border-border bg-bg-subtle px-3 py-2 font-mono text-[11px] text-fg-muted">
-            {state.githubRepo ?? "no owner/repo set on this project"}
-          </div>
-        </div>
-      </Card>
-
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        {/* Issues */}
-        <Card>
-          <CardHeader title="Open Issues" subtitle={`${state.issues.length} open`} />
-          <div className="p-2">
-            {state.issues.length === 0 ? (
-              <Empty
-                title={state.configured ? "No open issues" : "Issues will appear here"}
-                hint={state.configured ? "Every open issue on this repo is listed." : "Configure GitHub to fetch issues."}
-              />
-            ) : (
-              <div className="flex flex-col">
-                {state.issues.map((i) => (
-                  <div key={i.number} className="flex items-start gap-3 rounded-md border border-transparent px-2.5 py-2 hover:border-border hover:bg-bg-subtle/50 transition-colors">
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2">
-                        <Badge tone="amber">#{i.number}</Badge>
-                        <span className="truncate text-[12px] font-medium text-fg">{i.title}</span>
-                      </div>
-                      {i.labels.length > 0 && (
-                        <div className="mt-1 flex flex-wrap gap-1">
-                          {i.labels.map((l) => (
-                            <span key={l} className="rounded bg-bg-subtle px-1.5 py-0.5 text-[9px] text-fg-muted border border-border">
-                              {l}
-                            </span>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                    <Button variant="outline" size="xs" onClick={() => importIssue(i.number)} disabled={busy}>
-                      → task
-                    </Button>
-                    <a href={i.url} target="_blank" rel="noreferrer" className="mt-1 text-fg-dim hover:text-fg" aria-label={`Open issue #${i.number} on GitHub`}>
-                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6M15 3h6v6M10 14L21 3" />
-                      </svg>
-                    </a>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </Card>
-
-        {/* PR creation */}
-        <Card>
-          <CardHeader title="Create Pull Request" subtitle="From the selected branch" />
-          <div className="p-4">
-            <div className="grid grid-cols-2 gap-4">
-              <Field label="Head branch">
-                <select
-                  className="h-8 w-full rounded-md border border-border bg-bg-subtle px-2 text-xs text-fg font-mono cursor-pointer"
-                  value={prHead}
-                  onChange={(e) => setPrHead(e.target.value)}
-                >
-                  {branches.map((b) => (
-                    <option key={b} value={b}>
-                      {b}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-              <Field label="Base branch">
-                <select className="h-8 w-full rounded-md border border-border bg-bg-subtle px-2 text-xs text-fg font-mono cursor-pointer">
-                  <option>main</option>
-                  <option>master</option>
-                </select>
-              </Field>
-            </div>
-            <div className="mt-4">
-              <Field label="PR title">
-                <Input value={prTitle} onChange={(e) => setPrTitle(e.target.value)} placeholder={`PR for ${prHead}…`} />
-              </Field>
-            </div>
-            <div className="mt-4">
-              <Field label="Description">
-                <Textarea rows={3} value={prBody} onChange={(e) => setPrBody(e.target.value)} placeholder="Summary of changes, test plan…" />
-              </Field>
-            </div>
-            <div className="mt-4 flex items-center gap-3">
-              <label className="flex cursor-pointer items-center gap-2 text-[11px] text-fg-muted">
-                <input
-                  type="checkbox"
-                  checked={pushBranches}
-                  onChange={(e) => setPushBranches(e.target.checked)}
-                  className="accent-fg"
-                />
-                Push branch first (git push -u origin {prHead})
-              </label>
-            </div>
-            <div className="mt-3 flex items-center gap-2">
-              <Button onClick={createPr} disabled={busy || !prTitle.trim()}>
-                {busy ? "Creating…" : "Create pull request"}
-              </Button>
-            </div>
-            {message && <div className="mt-3 rounded-md border border-green/25 bg-green-soft px-3 py-2 text-[11px] text-green">{message}</div>}
-            {error && <div className="mt-3 rounded-md border border-red/30 bg-red-soft px-3 py-2 text-[11px] text-red">{error}</div>}
-          </div>
-        </Card>
-      </div>
+  const ready = !!connection?.connected && !!repository;
+  return <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
+    <section className="rounded-xl border border-border bg-bg-elevated p-5 sm:p-7" aria-labelledby="project-github-title">
+      <div className="flex flex-wrap items-start justify-between gap-4"><div className="flex items-center gap-3"><GithubMark /><div><h2 id="project-github-title" className="text-xl font-semibold tracking-tight">GitHub for this project</h2><p className="mt-1 text-sm text-fg-muted">Connect a repository, bring in issues, and deliver changes.</p></div></div><Badge tone={ready ? "green" : "dim"}>{loading ? "Checking" : ready ? "Ready" : "Setup needed"}</Badge></div>
+      {loading ? <div className="mt-5 flex items-center gap-2 text-sm text-fg-muted"><Spinner /> Loading connection and repository…</div> : <div className="mt-6 grid gap-5 sm:grid-cols-2">
+        <div><p className="text-xs font-medium text-fg-dim">1. GitHub account</p><p className="mt-2 text-sm font-medium">{connection?.connected ? connection.account?.login || "Server connection" : "Connect your account"}</p><Link href="/integrations" className="mt-2 inline-block text-sm underline underline-offset-4">{connection?.connected ? "Manage connection" : "Connect GitHub"} ↗</Link></div>
+        <div><p className="text-xs font-medium text-fg-dim">2. Project repository</p><p className="mt-2 break-all text-sm font-medium">{repository || "Choose a repository"}</p><Button variant="outline" className="mt-3" size="md" disabled={!connection?.connected || !!busy} onClick={() => { setShowPicker((v) => !v); if (!repoResultsReady) void findRepositories(); }}>{repository ? "Change repository" : "Choose repository"}</Button></div>
+      </div>}
+      {showPicker && <div className="mt-6 border-t border-border pt-5">
+        <form onSubmit={findRepositories} className="flex gap-2"><Input aria-label="Search accessible repositories" value={repoSearch} onChange={(e) => setRepoSearch(e.target.value)} placeholder="Filter recently updated repositories" className="!h-10 !text-sm" /><Button size="md" type="submit" disabled={searching}>{searching ? <Spinner /> : "Search"}</Button></form>
+        {searching && <p role="status" className="mt-3 flex items-center gap-2 text-sm text-fg-muted"><Spinner /> Loading repositories…</p>}
+        {repositoriesTruncated && <p className="mt-3 text-xs leading-5 text-fg-muted">Showing the first 100 recently updated accessible repositories. Enter owner/repository below if yours is not listed.</p>}
+        <div className="mt-3 max-h-72 overflow-y-auto" aria-live="polite">{repositories.map((repo) => <button key={repo.fullName} disabled={!!busy} onClick={() => void selectRepository(repo.fullName, repo.defaultBranch)} className="flex w-full items-center justify-between gap-3 rounded-lg px-3 py-3 text-left hover:bg-bg-subtle disabled:opacity-50"><span className="min-w-0"><span className="block break-all text-sm font-medium">{repo.fullName}</span>{repo.description && <span className="mt-1 block text-xs text-fg-muted">{repo.description}</span>}</span><Badge>{repo.private ? "Private" : "Public"}</Badge></button>)}{repoResultsReady && !repositories.length && <p className="py-5 text-sm text-fg-muted">No matching repositories. Check your token’s repository access or enter the repository below.</p>}</div>
+        <form className="mt-4 flex flex-wrap items-end gap-3 border-t border-border pt-4" onSubmit={(e) => { e.preventDefault(); void selectRepository(manualRepo); }}><Field label="Or enter owner/repository"><Input value={manualRepo} onChange={(e) => setManualRepo(e.target.value)} placeholder="owner/repository" required /></Field><Button type="submit" variant="outline" size="md" disabled={!!busy || !manualRepo.trim()}>Link repository</Button></form>
+      </div>}
+    </section>
+    {error && <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-red/25 bg-red-soft p-4 text-sm text-red"><span>{error}</span><Button variant="outline" onClick={() => void load()}>Retry</Button></div>}
+    {message && <p role="status" className="rounded-lg border border-green/25 bg-green-soft p-4 text-sm text-green">{message}</p>}
+    {createdPr && <p role="status" className="rounded-lg border border-green/25 bg-green-soft p-4 text-sm text-green">Pull request #{createdPr.number} created. <a href={createdPr.url} target="_blank" rel="noreferrer" className="underline">View on GitHub ↗</a></p>}
+    <div className="grid items-start gap-6 xl:grid-cols-2">
+      <section className="rounded-xl border border-border bg-bg-elevated" aria-labelledby="github-issues-heading">
+        <div className="flex items-center justify-between gap-3 border-b border-border p-5"><div><h3 id="github-issues-heading" className="text-base font-semibold">Issues to work on</h3><p className="mt-1 text-sm text-fg-muted">Turn an open issue into a project task.</p></div><Button variant="ghost" disabled={!ready || loading} onClick={() => void load()}>Refresh</Button></div>
+        {issues.length ? <ul className="divide-y divide-border px-5">{issues.map((issue) => <li key={issue.number} className="py-4"><a href={issue.url} target="_blank" rel="noreferrer" className="text-sm font-medium leading-6 hover:underline"><span className="mr-2 font-mono text-fg-muted">#{issue.number}</span>{issue.title} ↗</a>{issue.labels.length > 0 && <div className="mt-2 flex flex-wrap gap-1">{issue.labels.map((label) => <Badge key={label}>{label}</Badge>)}</div>}<Button variant="outline" size="md" className="mt-3" disabled={!!busy} onClick={() => void importIssue(issue.number)}>{busy === `issue-${issue.number}` ? "Importing…" : "Create task from issue"}</Button></li>)}</ul> : <div className="p-6"><p className="text-sm font-medium">{loading ? "Loading issues…" : ready ? "No open issues returned" : "Your issues will appear here"}</p><p className="mt-2 text-sm leading-6 text-fg-muted">{ready ? "Showing up to 30 open issues. Pull requests are listed on GitHub separately." : "Connect GitHub and choose a repository above to get started."}</p></div>}
+      </section>
+      <section className="rounded-xl border border-border bg-bg-elevated p-5 sm:p-6" aria-labelledby="github-pr-heading"><h3 id="github-pr-heading" className="text-base font-semibold">Open a pull request</h3><p className="mt-2 text-sm leading-6 text-fg-muted">Review the branches and describe your changes before publishing.</p>
+        <form onSubmit={createPr} className="mt-5 flex flex-col gap-4"><div className="grid gap-4 sm:grid-cols-2"><Field label="Your branch"><Select value={prHead} onChange={(e) => setPrHead(e.target.value)} disabled={!ready}>{!branches.length && <option value="">No local branches</option>}{branches.map((branch) => <option key={branch} value={branch}>{branch}</option>)}</Select></Field><Field label="Merge into"><Input value={prBase} onChange={(e) => setPrBase(e.target.value)} required disabled={!ready} placeholder="main" /></Field></div><Field label="Pull request title"><Input value={prTitle} onChange={(e) => setPrTitle(e.target.value)} required disabled={!ready} placeholder="What does this change do?" /></Field><Field label="Description"><Textarea rows={4} value={prBody} onChange={(e) => setPrBody(e.target.value)} disabled={!ready} placeholder="Summarize the changes and how you checked them." /></Field><label className="flex items-start gap-2 text-sm leading-6 text-fg-muted"><input type="checkbox" className="mt-1" checked={pushBranch} onChange={(e) => setPushBranch(e.target.checked)} disabled={!ready} /><span>Push this branch before creating the pull request. Uses your local Git credentials.</span></label><Button type="submit" size="md" className="self-start !h-10 !px-4 !text-sm" disabled={!ready || !!busy || !prTitle.trim() || !prHead || !prBase.trim()}>{busy === "pr" && <Spinner />}{busy === "pr" ? "Creating pull request…" : "Create pull request"}</Button>{!ready && <p className="text-xs text-fg-muted">Finish the two setup steps above to enable this form.</p>}</form>
+      </section>
     </div>
-  );
+  </div>;
 }

@@ -25,7 +25,7 @@ That is the per-project setup. No agent selection, dashboard server, API address
 
 | Client | Project configuration |
 |---|---|
-| Codex local CLI / compatible local app and IDE sessions | `.codex/config.toml` |
+| ChatGPT desktop local computer sessions / Codex CLI and IDE | `.codex/config.toml` |
 | Claude Code | `.mcp.json` |
 | Cursor | `.cursor/mcp.json` |
 | OpenCode V1 or V2 | Existing `opencode.json`/`.jsonc`, otherwise `opencode.jsonc` |
@@ -47,9 +47,68 @@ gridmind mcp              # generic stdio entry point for another MCP client
 
 Git subfolders resolve to the repository root. Linked worktrees use the main checkout's memory store; run `gridmind init` once in each worktree to install its client settings. Different project folders have separate stores. Hard-killed clients can retain a stale last-known connection status; the list is not an OS process monitor.
 
-The original dashboard mode below keeps its own configured data directory. Existing dashboard memories are not silently moved into a new folder's local store. To inspect a local store in the dashboard, launch the dashboard with `GRIDMIND_DATA_DIR` set to that project's `.gridmind` directory. Browser-only/cloud apps that cannot launch local stdio MCP need a separate remote integration; opening the folder alone cannot connect an unsupported app.
+The original dashboard mode below keeps its own configured data directory. Existing dashboard memories are not silently moved into a new folder's local store. To inspect a local store in the dashboard, launch the dashboard with `GRIDMIND_DATA_DIR` set to that project's `.gridmind` directory. Browser-only/cloud apps use the private tunnel setup below; opening a folder alone does not connect an app.
 
-Local verification: `npm test` runs the 14 existing regression tests plus 11 new project-memory tests. The new suite tests configuration preservation/idempotence, worktrees, client registration, concurrent SQLite startup, cross-client reads/writes, restarts, and project/private-note isolation using real MCP fixture processes. It does not launch paid models or verify every desktop app's UI.
+Local verification: `npm test` runs regression, GitHub, and project-memory tests. The project-memory suite tests configuration preservation/idempotence, worktrees, client registration, concurrent SQLite startup, cross-client reads/writes, restarts, and project/private-note isolation using real MCP fixture processes. It does not launch paid models or verify every desktop app's UI.
+
+## GUI agents and private MCP connections
+
+Open **Apps & integrations → Connect your AI apps**, select a project, then choose your app. It provides commands for the actual installation and selected folder, plus a portable stdio configuration download. Setup prepares connections; only a successful MCP call verifies that the app is using them.
+
+From this source checkout, run `npm run build:memory` first. An installed `gridmind` command can replace `node bin/gridmind.mjs` in these examples:
+
+```bash
+# ChatGPT desktop local sessions, Codex, Cursor and current VS Code Copilot:
+node bin/gridmind.mjs init --project /absolute/project
+# Detect standard GUI app locations and inspect prepared settings:
+node bin/gridmind.mjs gui --project /absolute/project
+# Claude Desktop: merge a project-specific server into app settings, with backups:
+node bin/gridmind.mjs gui claude-desktop --project /absolute/project
+# Optional OpenAI desktop plugin and local marketplace:
+node bin/gridmind.mjs gui chatgpt-desktop --project /absolute/project
+```
+
+Claude setup changes user-level settings and preserves other servers. The OpenAI plugin command prepares files under the project's `.gridmind/gui/openai/`; follow its returned marketplace registration/install instructions. Use `--dry-run` with either setup command to preview. Restart the relevant app, review its trust prompts, and ask it to call `gridmind_get_context`.
+
+ChatGPT web can reach the local memory server through [OpenAI Secure MCP Tunnel](https://developers.openai.com/api/docs/guides/secure-mcp-tunnels). Install the supported `tunnel-client`, obtain a tunnel linked to the intended workspace, and securely provide a runtime key through `CONTROL_PLANE_API_KEY`:
+
+```bash
+node bin/gridmind.mjs tunnel --project /absolute/project --tunnel-id tunnel_YOUR_ID --dry-run
+node bin/gridmind.mjs tunnel --project /absolute/project --tunnel-id tunnel_YOUR_ID
+```
+
+The tunnel starts in the foreground, defaults to read-only and exposes shared records only. Add `--write` to save shared project memory. In ChatGPT Plugins, add a custom MCP server using Connection: Tunnel and select that tunnel. Account/workspace permissions and a successful app call are required; Gridmind does not provision a tunnel or authorize your account automatically. Run one active runtime per tunnel ID.
+
+For another native HTTP MCP client:
+
+```bash
+node bin/gridmind.mjs serve --project /absolute/project
+```
+
+This starts authenticated Streamable HTTP on `127.0.0.1:47831/mcp` with a project-specific token in `.gridmind/http-token` (owner-only permissions). Enter that token into the client's Authorization Bearer secret/header setting. `--write` enables writes; `--port` changes the port. This local endpoint is not directly reachable from cloud apps and is not an OAuth server. Stdio and HTTP clients read/write the same folder store.
+
+The [GUI MCP research and setup guide](docs/gui-mcp-integration.md) covers current client support, local plugins, tunnel permissions, session privacy, architecture and verification boundaries. The installed SDK targets MCP through `2025-11-25`; newer protocol behavior is not claimed. `npm test` includes 53 regression, GitHub, project-memory, GUI setup, tunnel and HTTP tests. Live ChatGPT/Claude authorization and public plugin submission are separate acceptance steps.
+
+## GitHub app connection
+
+Open **Apps & integrations → GitHub** from the workspace or project sidebar. Connect once, then open a project’s **GitHub** tab and choose its repository. You can browse accessible repositories, import an issue as a task, and open a pull request from a local branch. The pull-request form sends the selected base branch; optional pushes use local Git credentials and require origin to match the linked repository.
+
+Two connection methods are available:
+
+- **Fine-grained personal access token:** works without registering an app. In the connection form, follow the link to GitHub, select the repositories you want to use, allow metadata and Issues read access, and add Pull requests write access when you want to create pull requests. Organization policy may require additional approval.
+- **Browser sign-in:** register a GitHub OAuth app with device flow enabled, set its public `GITHUB_CLIENT_ID` on the Gridmind server, then restart. The Connect button displays a device code and an official GitHub approval link; completion is detected automatically. No client secret is required for this flow. OAuth requests `repo` and `read:user`; review those scopes on GitHub. See [GitHub’s device-flow documentation](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/authorizing-oauth-apps#device-flow).
+
+No GitHub app registration or account authorization has been performed by Gridmind’s test suite. Until a client ID is configured, the interface offers the token connection rather than pretending browser authorization is available.
+
+Credentials are validated server-side, encrypted locally under `<GRIDMIND_DATA_DIR>/integrations/` (default `.gridmind/integrations/`), and never returned by the settings API. Both credential and encryption-key files use owner-only permissions. This protects against accidental plaintext exposure; it is not a system keychain or protection against another process running as your OS user. Keep the data directory private.
+
+Disconnect removes saved local credentials and cancels pending sign-ins. It does not revoke the token or OAuth grant at GitHub; revoke it in GitHub settings if needed. Existing `GITHUB_TOKEN` deployments remain supported and are shown as server-managed connections. Expired saved connections ask you to reconnect. Settings are restricted to the local server and same-origin browser requests; this is not a hosted multi-user authentication system.
+
+Repository browsing is bounded to the first 100 recently updated accessible repositories and shows a notice when there are more; enter `owner/repository` to link another accessible repository. Issue lists show up to 30 results and exclude pull-request entries. Existing dashboard-backed MCP GitHub tools use the saved connection. The standalone folder-memory MCP mode still exposes its seven memory tools; it does not automatically gain GitHub tools from this dashboard connection.
+
+The workspace now includes project search, readable project rows, guided setup, visible loading/error states, and grouped navigation with shared Memory near the top. Advanced Git, agent and handoff screens remain available.
+
+Validation uses mocked GitHub responses and disposable local Git remotes; it never authorizes a real account, opens a live PR, or pushes to GitHub. `npm test` includes the GitHub connection and PR regressions. The eleven existing integration suites remain separate under `npm run test:integration`.
 
 ## Overview
 

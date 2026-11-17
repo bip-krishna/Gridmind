@@ -1,27 +1,47 @@
 import { Octokit } from "@octokit/rest";
+import { createHash } from "node:crypto";
+import { githubCredential } from "./github-connection";
 
-const globalForHub = globalThis as unknown as { __gridmindHub?: Octokit };
+const globalForHub = globalThis as unknown as { __gridmindHub?: Octokit; __gridmindGithubFingerprint?: string };
 
 export function github(): Octokit | null {
-  const token = process.env.GITHUB_TOKEN;
-  if (!token) return null;
-  if (!globalForHub.__gridmindHub) {
+  const token = githubCredential();
+  if (!token) {
+    delete globalForHub.__gridmindHub;
+    delete globalForHub.__gridmindGithubFingerprint;
+    return null;
+  }
+  const fingerprint = createHash("sha256").update(token).digest("hex");
+  if (!globalForHub.__gridmindHub || globalForHub.__gridmindGithubFingerprint !== fingerprint) {
     globalForHub.__gridmindHub = new Octokit({ auth: token });
+    globalForHub.__gridmindGithubFingerprint = fingerprint;
   }
   return globalForHub.__gridmindHub;
 }
 
 export function isGithubConfigured(): boolean {
-  return Boolean(process.env.GITHUB_TOKEN);
+  return Boolean(githubCredential());
 }
 
 export type GithubRepo = { owner: string; repo: string };
 
 export function parseGithubRepo(input: string | null | undefined): GithubRepo | null {
-  if (!input) return null;
-  if (!input.includes("/")) return null;
-  const [owner, repo] = input.replace(/^https?:\/\/(www\.)?github\.com\//, "").replace(/\.git$/, "").split("/");
-  if (!owner || !repo) return null;
+  if (!input?.trim()) return null;
+  let value = input.trim();
+  if (/^(?:https?|ssh):\/\//i.test(value)) {
+    try {
+      const url = new URL(value);
+      const ssh = url.protocol === "ssh:";
+      if (!["github.com", "www.github.com"].includes(url.hostname) || url.password || url.search || url.hash
+        || (ssh ? url.username !== "git" || (url.port && url.port !== "22") : url.username || url.port)) return null;
+      value = url.pathname.replace(/^\//, "");
+    } catch { return null; }
+  } else value = value.replace(/^git@github\.com:/i, "");
+  const segments = value.replace(/\/$/, "").replace(/\.git$/, "").split("/");
+  if (segments.length !== 2) return null;
+  const [owner, repo] = segments;
+  if (!/^[a-z\d](?:[a-z\d-]{0,37}[a-z\d])?$/i.test(owner)
+    || !/^[a-z\d_.-]{1,100}$/i.test(repo) || repo === "." || repo === "..") return null;
   return { owner, repo };
 }
 
@@ -32,11 +52,7 @@ export async function inferGithubRepo(
   try {
     const { stdout } = await execAsync("git remote get-url origin", { cwd: repoPath });
     const url = stdout.trim();
-    const m = url.match(/github\.com[:/](.+?\/.+?)\.git$/);
-    if (m) {
-      const [owner, repo] = m[1].split("/");
-      return { owner, repo };
-    }
+    return parseGithubRepo(url);
   } catch {
     /* no remote */
   }
@@ -54,7 +70,7 @@ export type Issue = {
 
 export async function listIssues(gh: Octokit, repo: GithubRepo): Promise<Issue[]> {
   const res = await gh.issues.listForRepo({ ...repo, state: "open", per_page: 30 });
-  return res.data.map((i) => ({
+  return res.data.filter((i) => !i.pull_request).map((i) => ({
     number: i.number,
     title: i.title,
     state: i.state,

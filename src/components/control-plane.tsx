@@ -23,7 +23,7 @@ const TeamGraph = dynamic(
   {
     ssr: false,
     loading: () => (
-      <div className="flex h-[220px] w-full items-center justify-center rounded-lg border border-border bg-bg-elevated text-[11px] text-fg-dim animate-pulse">
+      <div className="flex h-[220px] w-full items-center justify-center rounded-lg border border-border bg-bg-elevated text-[13px] text-fg-dim animate-pulse">
         Initializing canvas…
       </div>
     ),
@@ -57,7 +57,7 @@ const NAV_ITEMS: { id: NavTab; label: string; icon: React.ReactNode }[] = [
   },
   {
     id: "agentsetup",
-    label: "Agent Setup",
+    label: "Team setup",
     icon: (
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <rect x="3" y="3" width="7" height="7" rx="1" />
@@ -91,7 +91,7 @@ const NAV_ITEMS: { id: NavTab; label: string; icon: React.ReactNode }[] = [
   },
   {
     id: "git",
-    label: "Git",
+    label: "Repository",
     icon: (
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <circle cx="6" cy="6" r="3" /><circle cx="6" cy="18" r="3" />
@@ -102,7 +102,7 @@ const NAV_ITEMS: { id: NavTab; label: string; icon: React.ReactNode }[] = [
   },
   {
     id: "timeline",
-    label: "Timeline",
+    label: "Activity log",
     icon: (
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <circle cx="12" cy="6" r="2" /><circle cx="5" cy="12" r="2" /><circle cx="19" cy="12" r="2" /><circle cx="12" cy="18" r="2" />
@@ -123,7 +123,7 @@ const NAV_ITEMS: { id: NavTab; label: string; icon: React.ReactNode }[] = [
   },
   {
     id: "context",
-    label: "Context",
+    label: "Memory",
     icon: (
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <path d="M12 20h9M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4L16.5 3.5z" />
@@ -131,6 +131,24 @@ const NAV_ITEMS: { id: NavTab; label: string; icon: React.ReactNode }[] = [
     ),
   },
 ];
+
+const NAV_GROUPS: { label: string; tabs: NavTab[] }[] = [
+  { label: "Project", tabs: ["overview", "context", "tasks", "agents"] },
+  { label: "Collaboration", tabs: ["github", "handoffs"] },
+  { label: "Project tools", tabs: ["git", "timeline", "agentsetup"] },
+];
+
+const TAB_DETAILS: Record<NavTab, { title: string; description: string }> = {
+  overview: { title: "Project overview", description: "See what’s happening, then choose your next step." },
+  context: { title: "Shared memory", description: "Keep useful project knowledge and engineering decisions available to your agents." },
+  tasks: { title: "Tasks", description: "Break work into clear tasks and follow it from assignment to completion." },
+  agents: { title: "Agents", description: "Start a run or inspect a previous session and its output." },
+  github: { title: "GitHub", description: "Choose this project’s repository, turn issues into tasks, and open pull requests." },
+  handoffs: { title: "Handoffs", description: "Pass completed work, decisions, and next steps between tasks." },
+  git: { title: "Repository", description: "Review branches, commits, and changes in your local repository." },
+  timeline: { title: "Activity log", description: "Inspect project events and how work progressed over time." },
+  agentsetup: { title: "Team setup", description: "Configure agent roles when you want Gridmind to launch and coordinate work." },
+};
 
 export function ControlPlane({
   projectId,
@@ -146,52 +164,45 @@ export function ControlPlane({
   const [tab, setTab] = useState<NavTab>("overview");
   const [focusSessionId, setFocusSessionId] = useState<string | null>(null);
   const { refreshKey, bump, connected } = useProjectPoll(projectId);
-  const [poked, setPoked] = useState(false);
   const [mobileNav, setMobileNav] = useState(false);
 
   const contentRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    window.scrollTo({ top: 0, behavior: "instant" });
     if (contentRef.current) {
       animateTabSwitch(contentRef.current);
     }
   }, [tab]);
 
   // Close mobile nav on tab change
+  useEffect(() => { setMobileNav(false); }, [tab]);
   useEffect(() => {
-    setMobileNav(false);
-  }, [tab]);
+    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") setMobileNav(false); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, []);
 
   function openSession(sessionId: string) {
     setFocusSessionId(sessionId);
     setTab("agents");
   }
 
-  async function poke() {
-    try {
-      await fetch(`/api/projects/${projectId}/stream/poke`, { method: "POST" });
-      setPoked(true);
-      setTimeout(() => setPoked(false), 2000);
-    } catch {
-      /* ignore */
-    }
-  }
 
   return (
     <div className="flex min-h-screen bg-bg text-fg">
+      <a href="#project-content" className="skip-link">Skip to project content</a>
       {/* Mobile nav overlay */}
       {mobileNav && (
-        <div
-          className="sidebar-overlay lg:hidden"
-          onClick={() => setMobileNav(false)}
-          aria-hidden="true"
-        />
+        <button className="sidebar-overlay lg:hidden" onClick={() => setMobileNav(false)} aria-label="Close navigation" />
       )}
 
       {/* Sidebar */}
       <aside
+        id="project-navigation"
+        data-open={mobileNav ? "true" : undefined}
         className={cn(
-          "fixed inset-y-0 left-0 z-30 flex w-56 flex-col border-r border-border bg-bg-elevated transition-transform duration-150",
+          "project-sidebar fixed inset-y-0 left-0 z-30 flex w-60 flex-col border-r border-border bg-bg-elevated transition-transform duration-150",
           mobileNav ? "translate-x-0" : "-translate-x-full lg:translate-x-0"
         )}
       >
@@ -205,32 +216,31 @@ export function ControlPlane({
             </svg>
           </div>
           <div className="min-w-0">
-            <div className="truncate text-[12px] font-semibold text-fg tracking-tight">{projectName}</div>
-            <div className="truncate text-[10px] font-mono text-fg-dim">{extractRepoName(repoPath)}</div>
+            <div className="truncate text-[13px] font-semibold text-fg tracking-tight">{projectName}</div>
+            <div className="truncate text-[13px] font-mono text-fg-dim">{extractRepoName(repoPath)}</div>
           </div>
         </div>
 
-        <nav className="flex flex-1 flex-col gap-0.5 px-2.5 py-2" aria-label="Main navigation">
-          {NAV_ITEMS.map((t) => (
-            <button
-              key={t.id}
-              onClick={() => setTab(t.id)}
-              className={cn(
-                "flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left text-[12px] transition-colors duration-100 cursor-pointer",
-                tab === t.id
-                  ? "bg-bg-subtle text-fg font-medium border border-border-strong"
-                  : "text-fg-muted hover:text-fg hover:bg-bg-subtle/50 border border-transparent"
-              )}
-              aria-current={tab === t.id ? "page" : undefined}
-            >
-              <span className="shrink-0 text-fg-dim">{t.icon}</span>
-              <span>{t.label}</span>
-            </button>
-          ))}
+        <nav className="flex-1 overflow-y-auto px-3 py-5" aria-label="Main navigation">
+          {NAV_GROUPS.map((group) => <div key={group.label} className="mb-6 last:mb-0">
+            <p className="mb-2 px-3 text-xs font-medium text-fg-dim">{group.label}</p>
+            <div className="flex flex-col gap-1">
+              {group.tabs.map((id) => {
+                const item = NAV_ITEMS.find((candidate) => candidate.id === id)!;
+                return <button key={id} onClick={() => { setTab(id); setMobileNav(false); }} className={cn(
+                  "flex min-h-10 items-center gap-3 rounded-md border px-3 py-2 text-left text-sm transition-colors cursor-pointer",
+                  tab === id ? "border-border-strong bg-bg-subtle font-semibold text-fg" : "border-transparent text-fg-muted hover:bg-bg-subtle/60 hover:text-fg"
+                )} aria-current={tab === id ? "page" : undefined}>
+                  <span className="shrink-0 text-fg-dim" aria-hidden="true">{item.icon}</span><span>{item.label}</span>
+                </button>;
+              })}
+            </div>
+          </div>)}
         </nav>
+        <Link href="/integrations" className="mx-3 mb-3 flex min-h-10 items-center justify-between rounded-md border border-border px-3 py-2 text-sm font-medium text-fg-muted transition-colors hover:border-border-strong hover:bg-bg-subtle hover:text-fg">Apps & integrations <span aria-hidden="true">↗</span></Link>
 
         <div className="flex items-center justify-between border-t border-border px-3.5 py-2.5">
-          <Link href="/" className="flex items-center gap-1.5 text-[11px] text-fg-dim hover:text-fg transition-colors">
+          <Link href="/" className="flex items-center gap-1.5 text-[13px] text-fg-dim hover:text-fg transition-colors">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M19 12H5M12 19l-7-7 7-7" />
             </svg>
@@ -241,59 +251,59 @@ export function ControlPlane({
       </aside>
 
       {/* Main Content */}
-      <div className="flex-1 lg:ml-56">
+      <div className="min-w-0 flex-1 lg:ml-60">
         {/* Header */}
         <header className="sticky top-0 z-20 border-b border-border bg-bg/95 backdrop-blur-none">
-          <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-2 md:px-6">
-            <div className="flex items-center gap-2.5">
+          <div className="mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 py-3 md:px-7">
+            <div className="flex min-w-0 flex-1 items-center gap-2.5">
               {/* Mobile hamburger */}
               <button
                 onClick={() => setMobileNav(true)}
                 className="flex lg:hidden size-7 items-center justify-center rounded-md border border-border text-fg-muted hover:text-fg transition-colors cursor-pointer"
                 aria-label="Open navigation"
+                aria-expanded={mobileNav}
+                aria-controls="project-navigation"
               >
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
                   <path d="M3 12h18M3 6h18M3 18h18" />
                 </svg>
               </button>
-              <div className="flex items-center gap-2 text-[11px]">
-                <span className="font-semibold text-fg">{projectName}</span>
-                <span className="text-fg-dim">/</span>
-                <span className="capitalize text-fg-muted">{tab.replace("agentsetup", "agent setup")}</span>
-                {githubRepo && <span className="font-mono text-fg-dim hidden md:inline">· {githubRepo}</span>}
+              <div className="flex min-w-0 items-center gap-2 text-sm">
+                <span className="max-w-36 truncate font-semibold text-fg sm:max-w-xs">{projectName}</span>
+                <span className="hidden text-fg-dim sm:inline">/</span>
+                <span className="hidden text-fg-muted sm:inline">{NAV_ITEMS.find((item) => item.id === tab)?.label}</span>
+                {githubRepo && <span className="hidden max-w-64 truncate text-xs text-fg-dim xl:inline">· {githubRepo}</span>}
               </div>
             </div>
             <div className="flex items-center gap-2">
-              <StatusIndicator
-                status={connected ? "online" : "offline"}
-                label={connected ? "LIVE" : "OFFLINE"}
-                pulse={connected}
-              />
-              <Button
-                variant="outline"
-                size="xs"
-                onClick={poke}
-                disabled={!connected}
-                title="Publish a test event to the live SSE stream"
-              >
-                {poked ? "Poked" : "Poke"}
-              </Button>
+              <span className="inline-flex shrink-0 items-center gap-2 text-xs text-fg-muted" role="status" aria-label={connected ? "Live updates connected" : "Live updates reconnecting"}>
+                <Dot tone={connected ? "green" : "dim"} /><span className="hidden sm:inline">{connected ? "Live updates" : "Reconnecting"}</span>
+              </span>
               <Button
                 variant="outline"
                 size="xs"
                 onClick={bump}
-                title="Sync project state"
+                title="Refresh project data"
+                className="!h-8 !px-3 !text-xs"
               >
-                Sync
+                Refresh
               </Button>
             </div>
           </div>
         </header>
 
-        <main ref={contentRef} className="mx-auto max-w-7xl px-4 py-5 md:px-6">
+        <main id="project-content" ref={contentRef} className="workspace-content mx-auto max-w-7xl px-4 py-7 md:px-7">
+          <div className="mb-7">
+            <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">{TAB_DETAILS[tab].title}</h1>
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-fg-muted">{TAB_DETAILS[tab].description}</p>
+          </div>
           {tab === "overview" && (
             <div className="flex flex-col gap-4">
               <OverviewHeader projectId={projectId} refreshKey={refreshKey} />
+              <div className="flex flex-col justify-between gap-4 rounded-lg border border-border bg-bg-elevated px-5 py-5 sm:flex-row sm:items-center">
+                <div><h2 className="text-sm font-semibold">Keep the next agent in the loop</h2><p className="mt-1 max-w-xl text-sm leading-6 text-fg-muted">Review shared memory for earlier decisions, or add a task to make your next step clear.</p></div>
+                <div className="flex shrink-0 flex-wrap gap-2"><Button variant="outline" onClick={() => setTab("context")} className="!h-9 !px-3 !text-sm">Open memory</Button><Button onClick={() => setTab("tasks")} className="!h-9 !px-3 !text-sm">View tasks</Button></div>
+              </div>
               <OverviewTeam projectId={projectId} refreshKey={refreshKey} onOpenSession={openSession} onOpenSetup={() => setTab("agentsetup")} />
               <div className="grid grid-cols-1 gap-4 xl:grid-cols-5">
                 <div className="xl:col-span-3">
@@ -333,43 +343,55 @@ function OverviewHeader({
   projectId: string;
   refreshKey: number;
 }) {
-  const [data, setData] = useState<{ git?: { info?: { dirty?: boolean; branch?: string }; commits?: unknown[]; branches?: string[] } }>({});
+  const [data, setData] = useState<{ repoInfo?: { dirty?: boolean; branch?: string }; current?: string; commits?: unknown[]; branches?: string[] }>({});
   const [tasks, setTasks] = useState<{ tasks?: { status: string }[] }>({});
   const [sessions, setSessions] = useState<{ sessions?: { status: string }[] }>({});
+  const [loaded, setLoaded] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     let mounted = true;
     Promise.all([
-      fetch(`/api/projects/${projectId}/git`).then((r) => r.json()).catch(() => ({})),
-      fetch(`/api/projects/${projectId}/tasks`).then((r) => r.json()).catch(() => ({})),
-      fetch(`/api/projects/${projectId}/agents`).then((r) => r.json()).catch(() => ({})),
+      ...["git", "tasks", "agents"].map(async (resource) => {
+        const response = await fetch(`/api/projects/${projectId}/${resource}`);
+        if (!response.ok) throw new Error("The project summary could not be loaded. Use Refresh to try again.");
+        return response.json();
+      }),
     ]).then(([g, t, s]) => {
       if (!mounted) return;
       setData(g);
       setTasks(t);
       setSessions(s);
+      setLoaded(true);
+      setLoadError(null);
+    }).catch((error) => {
+      if (mounted) setLoadError(error instanceof Error ? error.message : "The project summary could not be loaded.");
     });
     return () => {
       mounted = false;
     };
   }, [projectId, refreshKey]);
 
-  const dirty = data.git?.info?.dirty;
-  const branch = data.git?.info?.branch;
+  if (loadError) return <div role="alert" className="rounded-lg border border-red/25 bg-red-soft p-4 text-sm text-red">{loadError}</div>;
+  if (!loaded) return <div className="grid grid-cols-2 gap-3 md:grid-cols-4 lg:grid-cols-5" aria-label="Loading project summary" aria-busy="true">{[0, 1, 2, 3, 4].map((item) => <div key={item} className="h-20 animate-pulse rounded-lg border border-border bg-bg-elevated" />)}</div>;
+
+  const dirty = data.repoInfo?.dirty;
+  const branch = data.current || data.repoInfo?.branch;
   const taskList = tasks.tasks ?? [];
   const doneTasks = taskList.filter((t) => t.status === "done").length;
   const inProgress = taskList.filter((t) => t.status === "in_progress").length;
   const blocked = taskList.filter((t) => t.status === "blocked").length;
   const sessionsList = sessions.sessions ?? [];
   const running = sessionsList.filter((s) => s.status === "running").length;
+  const connectedClients = sessionsList.filter((s) => s.status === "connected").length;
 
   return (
     <div className="grid grid-cols-2 gap-3 md:grid-cols-4 lg:grid-cols-5">
       <StatCard label="Branch" value={branch || "—"} mono />
       <StatCard
         label="Working Tree"
-        value={dirty ? "dirty" : "clean"}
-        tone={dirty ? "amber" : "green"}
+        value={dirty === undefined ? "Unavailable" : dirty ? "Changes to review" : "No local changes"}
+        tone={dirty === undefined ? "dim" : dirty ? "amber" : "green"}
       />
       <StatCard label="Tasks" value={`${doneTasks}/${taskList.length} done`} mono />
       <StatCard
@@ -379,8 +401,8 @@ function OverviewHeader({
       />
       <StatCard
         label="Agents"
-        value={running > 0 ? `${running} running` : "idle"}
-        tone={running > 0 ? "accent" : "dim"}
+        value={running > 0 ? `${running} running` : connectedClients > 0 ? `${connectedClients} connected` : "idle"}
+        tone={running > 0 || connectedClients > 0 ? "accent" : "dim"}
         className="hidden lg:block"
       />
     </div>
@@ -392,7 +414,7 @@ function StatCard({ label, value, mono, tone, className }: { label: string; valu
     tone === "green" ? "text-green" : tone === "amber" ? "text-amber" : tone === "accent" ? "text-fg" : "text-fg";
   return (
     <div className={cn("rounded-lg border border-border bg-bg-elevated px-3.5 py-2.5", className)}>
-      <div className="text-[10px] uppercase tracking-wider text-fg-dim font-medium">{label}</div>
+      <div className="text-[13px] uppercase tracking-wider text-fg-dim font-medium">{label}</div>
       <div className={cn("mt-1 text-base font-semibold", mono && "font-mono tabular-nums", toneClass)}>{value}</div>
     </div>
   );
@@ -414,7 +436,12 @@ function ActivityFeed({ projectId, refreshKey }: { projectId: string; refreshKey
     fetch(`/api/projects/${projectId}/events`)
       .then((r) => r.json())
       .then((d) => {
-        if (mounted) setEvents((d.events ?? []).slice(-80));
+        if (mounted) setEvents((d.events ?? []).slice(-80).map((event: { id: number; type: string; payload: string | Record<string, unknown>; ts?: number; created_at?: number }) => {
+          let payload: Record<string, unknown> = {};
+          if (typeof event.payload === "string") { try { payload = JSON.parse(event.payload); } catch { /* invalid event payload */ } }
+          else payload = event.payload;
+          return { id: event.id, type: event.type, payload, ts: event.ts ?? event.created_at ?? 0 };
+        }));
       })
       .catch(() => undefined);
     return () => {
@@ -437,23 +464,23 @@ function ActivityFeed({ projectId, refreshKey }: { projectId: string; refreshKey
     { id: "task", label: "Task" },
     { id: "git", label: "Git" },
     { id: "handoff", label: "Handoff" },
-    { id: "context", label: "Context" },
+    { id: "context", label: "Memory" },
   ];
 
   return (
-    <Card className="h-[380px] overflow-hidden">
-      <div className="flex items-center justify-between border-b border-border px-3.5 py-2">
+    <Card className="flex h-[380px] flex-col overflow-hidden">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3">
         <div className="flex items-center gap-2">
           <h3 className="text-[13px] font-medium text-fg tracking-tight">Activity</h3>
           <StatusIndicator status={connected ? "online" : "offline"} pulse={connected} />
         </div>
-        <div className="flex items-center gap-0.5">
+        <div className="flex flex-wrap items-center justify-end gap-0.5">
           {filterOptions.map((f) => (
             <button
               key={f.id}
               onClick={() => setFilterType(f.id)}
               className={cn(
-                "rounded px-2 py-0.5 text-[10px] font-medium transition-colors cursor-pointer",
+                "rounded px-2 py-0.5 text-[13px] font-medium transition-colors cursor-pointer",
                 filterType === f.id ? "bg-bg-subtle text-fg" : "text-fg-dim hover:text-fg-muted"
               )}
             >
@@ -462,7 +489,7 @@ function ActivityFeed({ projectId, refreshKey }: { projectId: string; refreshKey
           ))}
         </div>
       </div>
-      <div ref={feedRef} className="h-[calc(380px-40px)] overflow-y-auto p-2">
+      <div ref={feedRef} className="min-h-0 flex-1 overflow-y-auto p-2">
         {filtered.length === 0 ? (
           <Empty title="No activity recorded" hint="Kick off an agent or commit changes to see live workflow events." />
         ) : (
@@ -480,15 +507,15 @@ function ActivityFeed({ projectId, refreshKey }: { projectId: string; refreshKey
 function ActivityRow({ e, last }: { e: { type: string; payload: Record<string, unknown>; ts: number }; last: boolean }) {
   const meta = eventMeta(e.type, e.payload);
   return (
-    <div className="flex gap-2.5 px-2 py-1 text-[11px] leading-relaxed">
+    <div className="flex gap-2.5 px-2 py-1 text-[13px] leading-relaxed">
       <div className="flex flex-col items-center pt-1">
         <span className={cn("size-1.5 rounded-full shrink-0", meta.dot)} />
         {!last && <span className="mt-1 w-px flex-1 bg-border" />}
       </div>
       <div className="min-w-0 pb-1 flex-1">
-        <span className="font-mono text-fg-dim uppercase tracking-wider text-[9px]">{meta.label}</span>
+        <span className="font-mono text-fg-dim uppercase tracking-wider text-[13px]">{meta.label}</span>
         {meta.detail ? <span className="ml-2 text-fg font-medium">{meta.detail}</span> : null}
-        {meta.sub && <div className="text-fg-dim font-mono text-[10px] mt-0.5">{meta.sub}</div>}
+        {meta.sub && <div className="text-fg-dim font-mono text-[13px] mt-0.5">{meta.sub}</div>}
       </div>
     </div>
   );
@@ -628,7 +655,7 @@ function OverviewTeam({
         adapters: (set as { adapters?: TeamState["adapters"] }).adapters ?? {},
         sessions: (ag as { sessions?: TeamState["sessions"] }).sessions ?? [],
         tasks: (tk as { tasks?: TeamState["tasks"] }).tasks ?? [],
-        branch: (g as { info?: { branch?: string | null } }).info?.branch ?? null,
+        branch: (g as { current?: string | null; repoInfo?: { branch?: string | null } }).current ?? (g as { repoInfo?: { branch?: string | null } }).repoInfo?.branch ?? null,
       });
     });
     return () => {
@@ -650,8 +677,8 @@ function OverviewTeam({
   return (
     <Card>
       <CardHeader
-        title="Agent Team Topology"
-        subtitle="Active multi-agent orchestration architecture"
+        title="Your agent team"
+        subtitle="Configured roles and current sessions"
         right={
           <Button variant="outline" size="xs" onClick={onOpenSetup}>
             Configure team
@@ -661,11 +688,11 @@ function OverviewTeam({
       {cards.length === 0 ? (
         <div className="flex flex-col items-center gap-2 px-6 py-10 text-center">
           <div className="text-[13px] font-medium text-fg">No team configured</div>
-          <p className="max-w-sm text-[11px] leading-relaxed text-fg-dim">
-            Configure a master agent and subagents to enable automatic dispatch and coordination.
+          <p className="max-w-sm text-[13px] leading-relaxed text-fg-dim">
+            Set up an agent team if you want Gridmind to launch work. For external MCP clients, use the project memory connection from your client.
           </p>
           <Button variant="outline" size="sm" onClick={onOpenSetup} className="mt-2">
-            Configure Master
+            Set up a team
           </Button>
         </div>
       ) : (
@@ -683,7 +710,7 @@ function OverviewTeam({
                 <button
                   key={c.id}
                   onClick={() => c.sessionId && onOpenSession(c.sessionId)}
-                  className="flex items-center gap-1.5 rounded border border-border bg-bg-subtle px-2 py-0.5 text-[10px] font-mono text-fg-muted hover:text-fg hover:border-border-strong transition-colors cursor-pointer"
+                  className="flex items-center gap-1.5 rounded border border-border bg-bg-subtle px-2 py-0.5 text-[13px] font-mono text-fg-muted hover:text-fg hover:border-border-strong transition-colors cursor-pointer"
                   title={`${c.name} — ${c.statusLabel}`}
                 >
                   <span className={cn("size-1.5 rounded-full shrink-0", c.working ? "bg-amber" : c.connected ? "bg-green" : "bg-fg-dim")} />
@@ -692,7 +719,7 @@ function OverviewTeam({
                 </button>
               ))}
             </div>
-            <span className="text-[10px] font-mono text-fg-dim">
+            <span className="text-[13px] font-mono text-fg-dim">
               {cards.filter((c) => c.working).length} working · {cards.filter((c) => !c.connected).length} offline
             </span>
           </div>
@@ -717,11 +744,11 @@ function OverviewPanels({
     <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
       <Card>
         <CardHeader
-          title="Master Orchestrator"
-          subtitle="Dispatch directives to your configured master agent"
+          title="Start coordinated work"
+          subtitle="Give your configured lead agent a clear task"
           right={
             <Button variant="outline" size="xs" onClick={onOpenSetup}>
-              Agent Setup
+              Team setup
             </Button>
           }
         />
@@ -749,6 +776,8 @@ function MasterLaunchForm({
   const [busy, setBusy] = useState(false);
   const [masterName, setMasterName] = useState<string | null>(null);
   const [masterType, setMasterType] = useState<string | null>(null);
+  const [launchError, setLaunchError] = useState<string | null>(null);
+  const [launched, setLaunched] = useState(false);
 
   useEffect(() => {
     let mounted = true;
@@ -767,12 +796,20 @@ function MasterLaunchForm({
 
   async function run() {
     setBusy(true);
+    setLaunchError(null);
+    setLaunched(false);
     try {
-      await fetch(`/api/projects/${projectId}/agents`, {
+      const response = await fetch(`/api/projects/${projectId}/agents`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ agentType: "opencode", role: "master", prompt: directive.trim() }),
       });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "The agent could not be started.");
+      if (result.available === false || result.session?.status === "error") throw new Error("The configured agent is unavailable. Check Team setup and install its CLI before starting work.");
+      setLaunched(true);
+    } catch (error) {
+      setLaunchError(error instanceof Error ? error.message : "The agent could not be started. Try again.");
     } finally {
       setBusy(false);
     }
@@ -781,25 +818,29 @@ function MasterLaunchForm({
   return (
     <div className="flex flex-col gap-2.5">
       {!masterName && (
-        <div className="flex items-center justify-between gap-2 rounded border border-amber/25 bg-amber-soft px-3 py-2 text-[11px] text-amber">
-          <span>No Master Agent configured.</span>
+        <div className="flex items-center justify-between gap-2 rounded border border-amber/25 bg-amber-soft px-3 py-2 text-[13px] text-amber">
+          <span>Choose a lead agent before starting work.</span>
           <button onClick={onOpenSetup} className="font-semibold underline cursor-pointer">
             Configure
           </button>
         </div>
       )}
       {masterName && (
-        <div className="flex items-center gap-2 rounded border border-border bg-bg-subtle px-3 py-1.5 text-[11px] font-mono text-fg-muted">
-          <span className="text-[10px] text-fg-dim uppercase">master</span>
+        <div className="flex items-center gap-2 rounded border border-border bg-bg-subtle px-3 py-1.5 text-[13px] font-mono text-fg-muted">
+          <span className="text-xs text-fg-dim">Lead agent</span>
           <span className="font-semibold text-fg">{masterName}</span>
           <span className="text-fg-dim">({masterType})</span>
         </div>
       )}
-      <Input value={directive} onChange={(e) => setDirective(e.target.value)} placeholder="Directive for the master agent" />
-      <Button onClick={run} disabled={busy || !directive.trim()}>
+      <label className="flex flex-col gap-2 text-sm text-fg-muted">What should the lead agent do?
+        <Input value={directive} onChange={(e) => setDirective(e.target.value)} placeholder="Describe the next task" className="!h-10 !text-sm" />
+      </label>
+      <Button onClick={run} disabled={busy || !directive.trim() || !masterName} className="!h-10 !text-sm">
         {busy ? <Spinner /> : null}
-        Run master agent
+        {busy ? "Starting agent…" : "Start lead agent"}
       </Button>
+      {launchError && <p role="alert" className="rounded-md border border-red/25 bg-red-soft px-3 py-2 text-sm text-red">{launchError}</p>}
+      {launched && <p role="status" className="text-sm text-green">Agent started. Open Agents to follow its progress.</p>}
     </div>
   );
 }
@@ -825,20 +866,20 @@ function TaskSummary({ projectId, refreshKey }: { projectId: string; refreshKey:
   return (
     <div>
       <CardHeader
-        title="Task Distribution"
+        title="Task progress"
         subtitle={`${tasks.length} tasks recorded`}
       />
-      <div className="grid grid-cols-4 gap-px bg-border">
+      <div className="grid grid-cols-2 gap-px bg-border sm:grid-cols-4">
         {(["todo", "in_progress", "blocked", "done"] as const).map((s) => (
           <div key={s} className="bg-bg-elevated px-3 py-2">
             <div className="font-mono text-base font-semibold text-fg tabular-nums">{counts[s]}</div>
-            <div className="text-[10px] uppercase font-mono tracking-wider text-fg-dim">{s.replace("_", " ")}</div>
+            <div className="text-[13px] uppercase font-mono tracking-wider text-fg-dim">{s.replace("_", " ")}</div>
           </div>
         ))}
       </div>
       <div className="p-2 divide-y divide-border/40">
         {tasks.slice(0, 4).map((t) => (
-          <div key={t.id} className="flex items-center gap-2 px-2 py-1 text-[11px]">
+          <div key={t.id} className="flex items-center gap-2 px-2 py-1 text-[13px]">
             <Dot tone={t.status === "done" ? "green" : t.status === "in_progress" ? "amber" : "dim"} />
             <span className="truncate text-fg-muted">{t.title}</span>
           </div>

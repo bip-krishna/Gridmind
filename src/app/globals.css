@@ -43,8 +43,8 @@
 
 .dark {
   /* DARK THEME */
-  --bg: #000000;
-  --bg-elevated: #09090b;
+  --bg: #0c0c0e;
+  --bg-elevated: #121214;
   --bg-subtle: #18181b;
   --bg-inset: #111113;
   --border: #27272a;
@@ -84,8 +84,8 @@
 
 @media (prefers-color-scheme: dark) {
   :root:not(.light) {
-    --bg: #000000;
-    --bg-elevated: #09090b;
+    --bg: #0c0c0e;
+    --bg-elevated: #121214;
     --bg-subtle: #18181b;
     --bg-inset: #111113;
     --border: #27272a;
@@ -269,4 +269,37 @@ pre {
 }
 .dark .sidebar-overlay {
   background-color: rgba(0, 0, 0, 0.7);
+}
+
+/* Keyboard users can jump past the project navigation. */
+.skip-link {
+  position: fixed;
+  top: 0.75rem;
+  left: 0.75rem;
+  z-index: 60;
+  padding: 0.75rem 1rem;
+  border-radius: 0.5rem;
+  background: var(--fg);
+  color: var(--bg);
+  font-size: 0.875rem;
+  font-weight: 600;
+  transform: translateY(-180%);
+}
+.skip-link:focus {
+  transform: translateY(0);
+}
+
+/* Keep reading and working surfaces comfortable on smaller screens. */
+.workspace-content {
+  min-width: 0;
+}
+.workspace-content p {
+  text-wrap: pretty;
+}
+.workspace-content table {
+  font-variant-numeric: tabular-nums;
+}
+@media (max-width: 1023px) {
+  .project-sidebar { visibility: hidden; }
+  .project-sidebar[data-open="true"] { visibility: visible; }
 }

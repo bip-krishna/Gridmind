@@ -8,6 +8,7 @@ import {
 import { newId } from "@/lib/agents";
 import { invalidateRepoInfo, getRepoInfo } from "@/lib/git";
 import fs from "node:fs";
+import { parseGithubRepo } from "@/lib/github";
 
 export const runtime = "nodejs";
 
@@ -26,6 +27,8 @@ export async function POST(req: Request) {
   let repoPath = body.repo_path?.trim();
   if (!name) return NextResponse.json({ error: "name is required" }, { status: 400 });
   if (!repoPath) return NextResponse.json({ error: "repo_path is required" }, { status: 400 });
+  const githubRepo = parseGithubRepo(body.github_repo);
+  if (body.github_repo && !githubRepo) return NextResponse.json({ error: "Enter a GitHub repository as owner/repository." }, { status: 400 });
 
   repoPath = repoPath.replace(/^~/, process.env.HOME ?? "");
   if (!fs.existsSync(repoPath) || !fs.statSync(repoPath).isDirectory()) {
@@ -42,7 +45,7 @@ export async function POST(req: Request) {
     id: newId(),
     name,
     repo_path: repoPath,
-    github_repo: body.github_repo ?? null,
+    github_repo: githubRepo ? `${githubRepo.owner}/${githubRepo.repo}` : null,
   });
 
   invalidateRepoInfo(repoPath);

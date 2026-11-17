@@ -51,6 +51,27 @@ The original dashboard mode below keeps its own configured data directory. Exist
 
 Local verification: `npm test` runs regression, GitHub, and project-memory tests. The project-memory suite tests configuration preservation/idempotence, worktrees, client registration, concurrent SQLite startup, cross-client reads/writes, restarts, and project/private-note isolation using real MCP fixture processes. It does not launch paid models or verify every desktop app's UI.
 
+## Project terminal
+
+Open a project and select **Terminal** in the sidebar, or **Open terminal** on its overview. Choose **New shell** to type commands directly, or use **Open OpenCode**, **Open Codex**, **Open Claude Code** or **Open Hermes** when that CLI is installed. The shell starts in the project's local repository folder; agent buttons launch the CLI's interactive interface with its normal permission and sign-in prompts.
+
+After updating Gridmind, install the new terminal dependencies and restart the dashboard:
+
+```bash
+npm install
+npm run dev
+```
+
+The browser terminal supports keyboard input, ANSI output, resizing, copy/paste, Ctrl+C, multiple sessions and reconnecting after a refresh. Switching panels leaves a session running. Use **Stop terminal** to terminate it and its owned child processes; stopped sessions are not restarted automatically. Terminal history is held in memory, bounded to recent output, and is not saved into project memory. Use the configured MCP tools when an agent should save a durable finding.
+
+Agent availability reflects the **Gridmind server's PATH**. If a launcher is missing, install its CLI and restart Gridmind from a terminal where that command works. A shell can also run other installed agents and normal commands such as `npm test`. The machine must remain awake and Gridmind must remain running.
+
+Keep the dashboard bound to `127.0.0.1`, as the supplied dev/start commands do. This is a local terminal with the server user's permissions, not a sandbox or a hosted multi-user terminal service. Routes validate the browser origin and bind sessions to a private browser cookie and project; those checks do not replace authentication for a public deployment. Gridmind's server/session credentials are excluded from the child environment; ordinary user CLI configuration and credentials remain available.
+
+The native terminal uses `node-pty` with xterm.js. On macOS, the installation script repairs the stable dependency's spawn-helper execute permission automatically. Other platforms can require native build tooling; Linux and Windows terminal behavior has not been verified by the macOS fixture run. Owned-descendant cleanup on macOS/Linux uses the system `ps` utility; restricted runtimes must permit process inspection. Running terminals expire after two hours without input or output, or two hours without an attached view; ended history is retained for up to 30 minutes. Successful terminal list requests renew the browser ownership cookie for 12 hours.
+
+`npm test` includes terminal boundary and lifecycle regressions. `npm run test:integration` additionally runs real PTY fixtures for project cwd, TTY mode, resize, colors, Ctrl+C, reconnection, a simulated interactive agent, child-process cleanup and Next server shutdown. No real agent/model is invoked by those tests.
+
 ## GUI agents and private MCP connections
 
 Open **Apps & integrations → Connect your AI apps**, select a project, then choose your app. It provides commands for the actual installation and selected folder, plus a portable stdio configuration download. Setup prepares connections; only a successful MCP call verifies that the app is using them.
@@ -87,7 +108,7 @@ node bin/gridmind.mjs serve --project /absolute/project
 
 This starts authenticated Streamable HTTP on `127.0.0.1:47831/mcp` with a project-specific token in `.gridmind/http-token` (owner-only permissions). Enter that token into the client's Authorization Bearer secret/header setting. `--write` enables writes; `--port` changes the port. This local endpoint is not directly reachable from cloud apps and is not an OAuth server. Stdio and HTTP clients read/write the same folder store.
 
-The [GUI MCP research and setup guide](docs/gui-mcp-integration.md) covers current client support, local plugins, tunnel permissions, session privacy, architecture and verification boundaries. The installed SDK targets MCP through `2025-11-25`; newer protocol behavior is not claimed. `npm test` includes 53 regression, GitHub, project-memory, GUI setup, tunnel and HTTP tests. Live ChatGPT/Claude authorization and public plugin submission are separate acceptance steps.
+The [GUI MCP research and setup guide](docs/gui-mcp-integration.md) covers current client support, local plugins, tunnel permissions, session privacy, architecture and verification boundaries. The installed SDK targets MCP through `2025-11-25`; newer protocol behavior is not claimed. `npm test` includes 63 regression, GitHub, project-memory, GUI setup, tunnel, HTTP and terminal tests. Live ChatGPT/Claude authorization and public plugin submission are separate acceptance steps.
 
 ## GitHub app connection
 

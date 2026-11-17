@@ -5,11 +5,15 @@ import { spawn, spawnSync } from "node:child_process";
 
 // Existing suites create/delete fixture repos. Keep every fixture, DB and agent
 // command in a disposable directory; never point these suites at a user's server.
-const suites = [
+const allSuites = [
   "agent-api", "stage2-lifecycle", "audit-regression", "stage3-worktree",
   "stage4-memory", "stage4-retrieval", "stage4-security", "stage4-task-auth",
-  "mcp-stage5a", "stage5b-handoffs", "stage5c-git-github",
+  "mcp-stage5a", "stage5b-handoffs", "stage5c-git-github", "terminal-pty",
 ];
+const requested = process.argv.indexOf("--suite");
+const selected = requested >= 0 ? process.argv[requested + 1] : null;
+if (requested >= 0 && !allSuites.includes(selected)) throw new Error("Choose an existing integration suite with --suite <name>.");
+const suites = selected ? [selected] : allSuites;
 if (!fs.existsSync(".next/BUILD_ID") || !fs.existsSync("dist/mcp/cli.mjs")) {
   throw new Error("Run npm run build before the isolated integration suite.");
 }
@@ -21,7 +25,7 @@ fs.mkdirSync(".test-build", { recursive: true });
 const testFiles = fs.mkdtempSync(path.join(".test-build", "integration-"));
 for (const dir of [bin, home, repos]) fs.mkdirSync(dir);
 for (const agent of ["opencode", "codex", "hermes"]) {
-  fs.writeFileSync(path.join(bin, agent), '#!/bin/sh\nif [ "$1" = "--version" ]; then echo fixture-agent; exit 0; fi\necho "$$" >> "$GRIDMIND_TEST_PID_FILE"\nexec /bin/sleep 300\n', { mode: 0o755 });
+  fs.writeFileSync(path.join(bin, agent), '#!/bin/sh\nif [ "$1" = "--version" ]; then echo fixture-agent; exit 0; fi\nif [ "$#" -eq 0 ]; then printf "Interactive agent fixture ready\\n"; exec /bin/sh -i; fi\necho "$$" >> "$GRIDMIND_TEST_PID_FILE"\nexec /bin/sleep 300\n', { mode: 0o755 });
 }
 // macOS /usr/bin/git invokes xcrun, whose cache is outside the fixture directory.
 if (process.platform === "darwin" && fs.existsSync("/Library/Developer/CommandLineTools/usr/bin/git")) {
@@ -70,7 +74,7 @@ try {
     const source = fs.readFileSync(`tests/${suite}.mjs`, "utf8");
     const file = path.join(testFiles, `${suite}.mjs`);
     fs.writeFileSync(file, source.replaceAll("/tmp/", `${repos}/`));
-    const result = spawnSync(process.execPath, [file], { env, encoding: "utf8", timeout: 90000, maxBuffer: 8 * 1024 * 1024 });
+    const result = spawnSync(process.execPath, [file], { env: { ...env, GRIDMIND_TEST_SERVER_PID: String(server.pid) }, encoding: "utf8", timeout: 90000, maxBuffer: 8 * 1024 * 1024 });
     stopFixtures();
     const output = `${result.stdout || ""}${result.stderr || ""}`;
     const passed = result.status === 0;

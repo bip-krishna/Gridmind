@@ -15,6 +15,7 @@ import { GithubPanel } from "@/components/panels/github-panel";
 import { ContextPanel } from "@/components/panels/context-panel";
 import { AgentSetupPanel } from "@/components/panels/agentsetup-panel";
 import { HandoffsPanel } from "@/components/panels/handoffs-panel";
+import { TerminalPanel } from "@/components/panels/terminal-panel";
 import dynamic from "next/dynamic";
 import { composeTopologyCards, type AgentCardInfo } from "@/lib/topology";
 
@@ -30,7 +31,7 @@ const TeamGraph = dynamic(
   }
 );
 
-type NavTab = "overview" | "agents" | "tasks" | "handoffs" | "git" | "timeline" | "github" | "context" | "agentsetup";
+type NavTab = "overview" | "agents" | "terminal" | "tasks" | "handoffs" | "git" | "timeline" | "github" | "context" | "agentsetup";
 
 const NAV_ITEMS: { id: NavTab; label: string; icon: React.ReactNode }[] = [
   {
@@ -52,6 +53,15 @@ const NAV_ITEMS: { id: NavTab; label: string; icon: React.ReactNode }[] = [
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <rect x="4" y="4" width="16" height="10" rx="2" />
         <path d="M8 21h8M12 14v7" />
+      </svg>
+    ),
+  },
+  {
+    id: "terminal",
+    label: "Terminal",
+    icon: (
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <rect x="3" y="4" width="18" height="16" rx="2" /><path d="m7 9 3 3-3 3M13 15h4" />
       </svg>
     ),
   },
@@ -133,7 +143,7 @@ const NAV_ITEMS: { id: NavTab; label: string; icon: React.ReactNode }[] = [
 ];
 
 const NAV_GROUPS: { label: string; tabs: NavTab[] }[] = [
-  { label: "Project", tabs: ["overview", "context", "tasks", "agents"] },
+  { label: "Project", tabs: ["overview", "context", "tasks", "agents", "terminal"] },
   { label: "Collaboration", tabs: ["github", "handoffs"] },
   { label: "Project tools", tabs: ["git", "timeline", "agentsetup"] },
 ];
@@ -143,6 +153,7 @@ const TAB_DETAILS: Record<NavTab, { title: string; description: string }> = {
   context: { title: "Shared memory", description: "Keep useful project knowledge and engineering decisions available to your agents." },
   tasks: { title: "Tasks", description: "Break work into clear tasks and follow it from assignment to completion." },
   agents: { title: "Agents", description: "Start a run or inspect a previous session and its output." },
+  terminal: { title: "Project terminal", description: "Work with your shell or CLI agents directly in this project folder." },
   github: { title: "GitHub", description: "Choose this project’s repository, turn issues into tasks, and open pull requests." },
   handoffs: { title: "Handoffs", description: "Pass completed work, decisions, and next steps between tasks." },
   git: { title: "Repository", description: "Review branches, commits, and changes in your local repository." },
@@ -302,7 +313,7 @@ export function ControlPlane({
               <OverviewHeader projectId={projectId} refreshKey={refreshKey} />
               <div className="flex flex-col justify-between gap-4 rounded-lg border border-border bg-bg-elevated px-5 py-5 sm:flex-row sm:items-center">
                 <div><h2 className="text-sm font-semibold">Keep the next agent in the loop</h2><p className="mt-1 max-w-xl text-sm leading-6 text-fg-muted">Review shared memory for earlier decisions, or add a task to make your next step clear.</p></div>
-                <div className="flex shrink-0 flex-wrap gap-2"><Button variant="outline" onClick={() => setTab("context")} className="!h-9 !px-3 !text-sm">Open memory</Button><Button onClick={() => setTab("tasks")} className="!h-9 !px-3 !text-sm">View tasks</Button></div>
+                <div className="flex shrink-0 flex-wrap gap-2"><Button variant="outline" onClick={() => setTab("context")} className="!h-9 !px-3 !text-sm">Open memory</Button><Button variant="outline" onClick={() => setTab("terminal")} className="!h-9 !px-3 !text-sm">Open terminal</Button><Button onClick={() => setTab("tasks")} className="!h-9 !px-3 !text-sm">View tasks</Button></div>
               </div>
               <OverviewTeam projectId={projectId} refreshKey={refreshKey} onOpenSession={openSession} onOpenSetup={() => setTab("agentsetup")} />
               <div className="grid grid-cols-1 gap-4 xl:grid-cols-5">
@@ -319,6 +330,7 @@ export function ControlPlane({
           {tab === "agents" && (
             <AgentsPanel projectId={projectId} refreshKey={refreshKey} focusSessionId={focusSessionId} onFocusConsumed={() => setFocusSessionId(null)} />
           )}
+          {tab === "terminal" && <TerminalPanel key={projectId} projectId={projectId} repoPath={repoPath} />}
           {tab === "tasks" && <TasksPanel projectId={projectId} refreshKey={refreshKey} />}
           {tab === "handoffs" && <HandoffsPanel projectId={projectId} refreshKey={refreshKey} />}
           {tab === "git" && <GitPanel projectId={projectId} refreshKey={refreshKey} />}

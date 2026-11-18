@@ -2,9 +2,9 @@
 
 **Shared project memory and a local dashboard for AI coding agents.**
 
-Save project decisions and findings so coding agents can pick up work across sessions. Open the local dashboard to track tasks, inspect Git changes, and hand work off.
+Save decisions and findings once so another coding agent can pick them up. Use the dashboard when you also need to track tasks, run agents, inspect Git changes, or hand work off to another session.
 
-[Install](#install) · [Share project memory](#share-project-memory) · [Use the dashboard](#use-the-dashboard) · [Integration guide](docs/gui-mcp-integration.md) · [Release checklist](#release-checklist)
+[Install](#install) · [Share project memory](#share-project-memory) · [Use the dashboard](#use-the-dashboard) · [Release checklist](#release-checklist)
 
 **v0.1.0 · Local development preview · Install from source**
 
